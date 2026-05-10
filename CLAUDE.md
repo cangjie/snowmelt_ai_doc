@@ -145,6 +145,10 @@ dotnet run
   - 回填字段映射：`product.barcode → code` / `product.id → rent_product_id` / `product.category_id → category_id` / `product.category.name → class_name` / `product.name → name`；清 `memo`，刷新 `_entered` + `_statusLabel` + `_updateRentalChip` + `_emitSync`
   - 重复编码校验：购物车内除自己外不允许相同 `code`（`noNeed` / `noCode` 不参与），违反 toast「编码已被占用」拦截不写入
   - 扫码（`onItemScan`）仍然可用，独立于搜索 modal
+- **主项 rentItem 必须选分类**：`evalEntry` 把 `!is_associate && !category_id` 视为最高优先级缺项，chip 显示 `分类未选`（先于 `名称未填` / `编码未填`）。`_refreshRentals` 派生：`needsCategory = !is_associate && !category_id && !noNeed` 时，标题派生为 `待选分类`，且 `expandedItem[ikey] === undefined` 默认 `true`（首次添加自动展开让用户立刻看到分类入口）。
+- **附件项录入校验改为标准**：原 `evalEntry` 对 `is_associate=true` 的豁免分支已删除。附件项（如双板带的雪杖）现在与主项一套校验：`noCode=true` 默认 → 必须录名称；缺则 chip 显示 `名称未填`，rental 级派生 `N 件未录入`，结算按钮 disable。后端 `BuildAssociates` 默认 `noCode=true, atOnce=true, is_associate=true`，前端创建附件项时与之对齐。
+- **「无码物品」入口流程**：点底部「无码物品」→ `recept_new._addBlankRental` 创建一个 `category_id=null` 的 rental + 一个主项 rentItem（`is_associate=false, noCode=true, category_id=null, name=null, code=null`）→ 卡片默认展开 → 用户点卡片中「分类」行打开 `van-tree-select` modal → 选定后 `_applyCategoryChange` 拉 `getRentCategoryPromise(catId)` + `getRentPriceListPromise` → 更新主项字段 + 删旧附件 + 按 `associateCategories` 重建附件 + 同步 `rental.category_id/name/guaranty/priceList` + `util.createRentalDetail` 重算 `pricePresets` → emit `syncRent`（needUpdate=true）父页保存。**反复切换主项分类**：每次切换都重建附件，从有附属分类切到无附属分类时附件项自动消失。
+- **分类 modal 设计**：`van-popup position=bottom round` + `van-tree-select` + 取消/确认按钮。分类树懒加载：`_ensureCategoryTreeLoaded` 拉顶级（`getTopCategoriesPromise`），`_loadCategorySub(idx)` 按需拉子分类（`getSubCategoriesPromise`）。`_categoryChildMap`（按 sub id → 完整分类对象）只缓存在 component data，不持久化，重新进页面会重拉。
 
 ---
 
@@ -155,10 +159,10 @@ dotnet run
 **关键文件**
 - 页面：`pages/admin/reception/recept_entry`、`recept_new`、`recept_package`
 - 组件：`components/reception/rent_recept_form`（购物车 + 详情卡片 + 日历 modal + 编码搜索 modal）、`components/reception/search_product_fuzzy`（编码搜索弹窗，可复用）
-- 数据接口（已对接）：`Order/GetShops`、`Rent/GetRentPackageList`、`Rent/GetRentPackage/{id}`、`Rent/GetRentPriceList`、`Rent/SaveRentRecept`、`Order/GetShopByName`、`Rent/GetRentProductFuzzy`
+- 数据接口（已对接）：`Order/GetShops`、`Rent/GetRentPackageList`、`Rent/GetRentPackage/{id}`、`Rent/GetRentPriceList`、`Rent/SaveRentRecept`、`Order/GetShopByName`、`Rent/GetRentProductFuzzy`、`Rent/GetTopRentCategories`、`Rent/GetSubRentCategories/{id}`、`Rent/GetRentCategory/{id}`
 
 **下一步要做的**
-- 第二步剩余：扫描条码（`Rent/QueryByBarcode`）、搜索单品（底部入口，可复用 `search_product_fuzzy` 组件）、无码物品 三个底部入口（目前仅 toast 占位）
+- 第二步剩余：扫描条码（`Rent/QueryByBarcode`）入口（目前仅 toast 占位）
 - 第二步剩余：去结算按钮接入支付流程（按钮 disable 逻辑已就绪，等支付页对接）
 - 第五步：支付结算页（生成二维码 → 顾客扫码 → openid/payerid 会员匹配）
 - 养护 / 零售 业务的接待表单组件（目前仅租赁完成）
@@ -174,6 +178,8 @@ dotnet run
 - 装备编码 input 改成 view + bindtap 后**用户无法手动键入编码**，只能通过搜索 modal 或扫码录入；与旧版语义一致，但若有客户特殊编码不在数据库里则无法处理（极端场景）
 - 多品类槽位（`canChooseCategory: true`）搜索 modal 限定 `chooseCategories[0]`（第一品类）；如需搜其他品类需手动改 `item.category_id` 或后续做品类切换 UI
 - 全局中文 `urldecode` 目前仅拦截 `wx.request` 的 `POST` 且仅处理 `data`；`GET` query 参数和非 `wx.request` 通道（如 `wx.uploadFile`）不在本次覆盖范围
+- 分类树 `categoryItems / _categoryChildMap` 不持久化，重新进入 `recept_new` 时第一次点开分类 modal 会重新拉取顶级 + 子分类（懒加载）。如频繁打开影响体验，可改成 page 级缓存或 globalData
+- 主项分类切换会触发 `Rent/SaveRentRecept`（通过 `triggerEvent('syncRent', { needUpdate: true })`），保存返回的 rental 经 properties observer 回流刷新。如果后端返回的 priceList 不含我们刚拉的内容会被覆盖（目前未发现问题）
 
 ---
 
@@ -360,3 +366,39 @@ dotnet run
 - ✅ **容错与回退策略**
   - 非法编码字符串 decode 失败时保留原值，不阻断请求
   - 增加 `wx.__snowmeetPostDataDecodedPatched` 防重入标记，确保 patch 幂等
+
+### 2026-05-10 — 附件项录入校验修复 + 「无码物品」入口落地
+
+主要文件：`components/reception/rent_recept_form/{js,wxml,wxss,json}` + `pages/admin/reception/recept_new.js`
+
+#### 一、附件项录入校验修复（plan 流程）
+
+- 📌 **根因**：`evalEntry` 对 `is_associate=true` 做了特殊豁免（只校验 `pick_type`，跳过 `code/name`），导致搜索单品自动带出的附件项（如双板带雪杖）默认显示 `已录入`，即使名称/编码都为空 → 用户被误导直接结算 → 漏录入数据被提交后端
+- ✅ **修复**：删除 `is_associate` 豁免分支（`rent_recept_form.js:37-54`），附件项走与主项一致的 noCode/name/code/pick_type 校验。附件项默认 `noCode=true` → 必须录名称才算完整
+- 下游自动生效：`_refreshRentals` / 6 个 mutator / `evalRental` / `_refreshSummary` 都已对接 `evalEntry`，无需另改
+
+**plan 文件**：`/Users/cangjie/.claude/plans/stockli-stockli-noble-moon.md`
+
+#### 二、「无码物品」入口完整实现
+
+- ✅ **页面入口** (`recept_new.js`)：`onAddAction` 处理 `action='noCode'` 分支，新增 `_addBlankRental()` 方法 — 构造 `category_id=null` 的 rental + 主项 rentItem（`is_associate=false, noCode=true, name=null, code=null, pick_type=defaultPickType`）→ `_appendRentals` 追加并保存
+- ✅ **`evalEntry` 增加分类必填**：`!is_associate && !category_id` → 最高优先级返回 `分类未选`，先于 `名称未填` / `编码未填` / `模式未选`
+- ✅ **`_refreshRentals` 派生**：`needsCategory = !is_associate && !category_id && !noNeed` → 标题改为 `待选分类`、`expandedItem[ikey]` 首次默认 `true`（无码物品创建后立刻展开）
+- ✅ **rentItem 卡片增加「分类」form-group**：展开态首行，仅 `!rit.is_associate` 显示；可点击区，显示 `class_name` 或 placeholder「点此选择分类」
+- ✅ **分类选择 modal**：`van-popup position=bottom round + van-tree-select` 单实例（组件根尾部，与 van-calendar / search-product-fuzzy 同位置）；分类树懒加载（顶级 + 子分类按需拉）
+  - `rent_recept_form.json` 注册 `van-popup` / `van-tree-select`
+  - State：`categoryShow / categoryRidx / categoryIidx / categoryItems / categoryActiveId / categoryMainActiveIndex / categoryRaw / _categoryChildMap`
+  - Handlers：`onItemCategoryTap` / `_ensureCategoryTreeLoaded` / `_loadCategorySub` / `onCategoryNav` / `onCategoryItemTap` / `onCategoryClose` / `onCategoryConfirm` / `_applyCategoryChange`
+- ✅ **核心联动 `_applyCategoryChange(ridx, iidx, newCat)`**：
+  1. 并行拉 `getRentCategoryPromise(newCat.id)`（含 `associateCategories`）+ `getShopByNamePromise(shop)`
+  2. 拉 `getRentPriceListPromise(shopId, '分类', newCat.id, '门市')`
+  3. 主项 rentItem 字段更新（`category_id / category / class_name / categoryName / chooseCategories / canChooseCategory`）；**保留 `noCode/noNeed`**，不改用户已有的「无码」状态
+  4. 删除原所有 `is_associate=true` 附件项 + 按新分类的 `associateCategories` 重建（字段对齐 `BuildAssociates` 默认值）
+  5. 同步 rental 字段：`category_id / category / name / guaranty / realGuaranty / guaranty_discount / priceList`
+  6. `util.createRentalDetail` 重算 `pricePresets`（`getDailyRate` 取 `pricePresets[0].price`）
+  7. emit `syncRent` (needUpdate=true) → 父页 `saveRentReceptOrder`
+- ✅ **反复切换主项分类**：每次切都触发完整重建。从有附属分类切到无附属分类 → 附件项自动消失；反之自动带出
+- 📌 **后端兼容**：`Rental.category_id` / `RentItem.category_id` 都是 `int?`（可空），允许保存 `category_id=null` 的无码物品 rental 到后端
+- 📌 **缓存提示**：改完 `components/reception/*` 后微信开发者工具需 `Tools → Cache → Clear all data + Clear file cache + 编译`，否则可能看到旧行为
+
+**plan 文件**：`/Users/cangjie/.claude/plans/stockli-stockli-noble-moon.md`（仅第一项走过 plan，「无码物品」基于用户多轮 feedback 直接实施）
