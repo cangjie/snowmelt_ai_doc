@@ -189,6 +189,7 @@ dotnet run
 - 第二步：去结算按钮入口（已在 `onCheckout` 接通 `Order/PlaceRentOrder` + navigateTo settle）
 - 养护 / 零售 业务的接待表单组件（目前仅租赁完成）
 - 旧版页面迁移：`recept_auth_list`、`recept_member_info`、`recept_list`、`rent_recepting_list`
+- 支付前身份验证（PRD 1.4.5 + 1.4.1）— plan 已审批待开工，见 `snowmeet_ai_doc/payment_identity_verification_plan.md`：后端加 `Order.pay_member_id` + `Order.is_proxy_pay` + 新建 `PaymentIdentityController`；小程序 `payment_entry` 改造 + 新建 `pay-identity-confirm` 组件
 
 **已知遗留**
 - `needIntercom`（雪板类租赁默认加对讲机）相关逻辑已注释，未来需要时可恢复
@@ -209,6 +210,13 @@ dotnet run
 - payment_entry 折叠交互手写 `wx:if`，未引入 `van-collapse` 等组件以保持轻量；一个 Rental 内 rentItem 数量上限按 ~10 件设计
 - payment_entry 押金/日租金列宽固定 `300rpx`（5 位数字预算 `¥99999.00`），超出会被挤压；如业务出现万元以上押金需要回来调
 - payment_entry `pay()` 内成功回调里第二次拉单时把 `payment.id` 当成 paymentId 传，但拉回来的对象是新的 order（含 nonce 等微信字段已是 undefined），这一段是历史代码，本轮 UI 改造未触碰，留待后续清理
+- **数据库 schema 新旧并存**：旧 schema `order_online` / `rent_list` / `rent_list_detail` 在 2025-10-15 后已无数据；新 schema 在用 `[Table("order")]` (Order.cs) / `rental` / `rental_detail` / `rent_item`。所有新查询和报表都走新 schema。本地 SnowmeetApi 当前 master 没有 `Order.cs`，开发需先 `git checkout ai`
+- **生产数据库**：`100.28.143.19:1433` SQL Server 2022 CU21，库 `snowmeet_new`；连接字符串保存在仓库外 `config.sqlServer` 文件（gitignore），不在 appsettings.json
+- **退款判定标准**：`payment_refund.state=1 OR refund_id 非空非空字符串`，与 `Models/Rent/RentOrder.cs:519` 旧逻辑一致；仅 `state=1` 会漏掉绝大多数已发起但未回调的退款（万龙时段实测漏 538 万）
+- **wepay_key 关联**：`order_payment.mch_id` 实际存的是 `wepay_key.id`（如 5/10/12），真实微信商户号在 `wepay_key.mch_id`（如 1604236346 万龙租赁主力账户）。统计需 JOIN
+- **rental_detail.charge_type 三种值**：`租金` / `超时费` / `赔偿金`（中文，注意"赔偿金"非"赔偿"）。按 rental 分组求和
+- **未结算订单虚账**：`rental.settled=0` 的 rental 会持续按天累积 `rental_detail` 应收记录（如雪季初一直没关单的，累积到 189 天 ¥9 万）。做收入报表必须过滤已结算/已关闭，否则虚增
+- **`api/Rent/GetConfirmedRentOrder` (RentController.cs:5544) 的"确认订单"5 条规则**：paidAmount > 0 AND closed=1 AND close_date != null AND !hide AND 不含非微信非支付宝支付（现金/储值/转账等会被排除）；做对账报表时这是参考过滤口径
 
 ---
 
@@ -517,3 +525,20 @@ dotnet run
 - 📌 **`pay()` 内的旧 bug 顺手未改**：`pay()` 第二次拉单时把 `payment.id` 当成 paymentId 传，但拉回来的字段是 `nonce/prepay_id/sign/timestamp`，第二次读这些就是 undefined。本次不在范围内，保留原状
 
 **plan 文件**：`/Users/cangjie/.claude/plans/pages-order-payment-entry-valiant-sky.md`
+
+### 2026-05-13 — 万龙租赁数据导出 + CSV 对账 + 身份验证 plan
+
+主要产出（`D:\snowmeet\snowmeet_ai_doc\`）：
+- `export_wanlong_rent_orders.py` + `wanlong_rent_orders_2025-10-15_2026-04-15.xlsx`：万龙体验中心 2025-10-15~2026-04-15 租赁订单导出，3 个 sheet（订单汇总 2325 / 订单明细 2839 / 支付明细 2125），所有日期字段拆为「日期+时间」两列，支付明细按 wepay_key JOIN 出真实微信商户号
+- `compare_detail_vs_csv.py` + `comparison_report.xlsx`：与外部下载的 3 个 `ZuLinDingDan_*.csv` 对账（5 sheet），CSV 仅取 `WT_` 开头
+- `export_csv_excel_diff.py` + `split_excel_only_by_reason.py` + `csv_excel_diff.xlsx`：差异表 8 sheet。仅 Excel 有的 791 行明细按 `api/Rent/GetConfirmedRentOrder` 5 条规则拆为 6 类（paid为0 / closed为0_未关闭 / close_date为空 / hide为1_隐藏 / 含非微信非支付宝 / 应通过但CSV没有）
+- `payment_identity_verification_plan.md`：支付前身份验证实施方案（按 PRD V0.13 流程图 image1.png + 用户 4 条修正版），决策树 4 状态 + 错误，**待开工**
+- 旧版全店导出脚本/产出：`export_rent_orders.py` + `rent_orders_2025-10-15_2026-04-15.xlsx`（可保留对比，也可清理）
+
+📌 关键发现 / 教训：
+- 之前 CLAUDE.md 提到的 `Order/PlaceRentOrder` / `OrderController.GenerateOrderCode` 在 master 分支不存在，全部在 `origin/ai` 分支。涉及订单业务的后端开发前必须先 `git checkout ai`，否则改的是 `OrderOnline.cs` 而非新的 `Order.cs`
+- `OrderOnline.payer` 字段几乎是死字段（仅 `Mi7OrderController.cs:125` 单点写入未读），新功能不可重用，需独立加 `pay_member_id`
+- 万龙 2325 单实付 ¥7,204,721 / 退款 ¥6,604,799 / 结余 ¥599,922 — 押金大头基本都退回了，季度净留存 60 万
+- 万龙微信支付分 3 商户：1604184933(万龙租赁，主力 67% / 1349 笔 ¥483 万) / 1636313350(旗舰租赁 / 316 笔 ¥83 万 — 历史遗留) / 1636404775(万龙零售 / 9 笔 ¥1.1 万)
+- Excel 明细 ¥250 万 vs CSV ¥53 万 差 ¥197 万，主因是 `rental.settled=0` 的未归还订单（如 `WT_ZL_251030_00009` "试滑双板(有用勿删)" / "测试" 已付 ¥0.04 但 rental_detail 累积 189 天 ¥7-9 万虚账）
+- 微信开发者工具 `getPhoneNumber` 不返真实号，身份验证测试必须真机；建议加 `?mockCell=` 开发后门
