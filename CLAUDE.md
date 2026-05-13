@@ -150,6 +150,15 @@ dotnet run
 - **「无码物品」入口流程**：点底部「无码物品」→ `recept_new._addBlankRental` 创建一个 `category_id=null` 的 rental + 一个主项 rentItem（`is_associate=false, noCode=true, category_id=null, name=null, code=null`）→ 卡片默认展开 → 用户点卡片中「分类」行打开 `van-tree-select` modal → 选定后 `_applyCategoryChange` 拉 `getRentCategoryPromise(catId)` + `getRentPriceListPromise` → 更新主项字段 + 删旧附件 + 按 `associateCategories` 重建附件 + 同步 `rental.category_id/name/guaranty/priceList` + `util.createRentalDetail` 重算 `pricePresets` → emit `syncRent`（needUpdate=true）父页保存。**反复切换主项分类**：每次切换都重建附件，从有附属分类切到无附属分类时附件项自动消失。
 - **分类 modal 设计**：`van-popup position=bottom round` + `van-tree-select` + 取消/确认按钮。分类树懒加载：`_ensureCategoryTreeLoaded` 拉顶级（`getTopCategoriesPromise`），`_loadCategorySub(idx)` 按需拉子分类（`getSubCategoriesPromise`）。`_categoryChildMap`（按 sub id → 完整分类对象）只缓存在 component data，不持久化，重新进页面会重拉。
 - **押金/租金编辑改为 modal 二次确认**：rental 详情卡里的押金、租金/日 不再是 input + blur，改为 `<view bindtap>` → `wx.showModal({editable:true})` 输入 → 第二个 `wx.showModal` 二次确认 → 调用 `_applyPkgDeposit / _applyPkgRate` 写入。**关键坑**：服务端 `Rent/SaveRentRecept` 往返**不保留** `realGuaranty`，`_refreshRentals` 用 `realGuaranty ?? guaranty` 取值，所以押金应用时必须同时更新 `guaranty=v` + `guaranty_discount=0`，否则 sync 回来后 UI 被刷回旧值。租金存在 `pricePresets[0].price` 里服务端原样返回，无此问题。
+- **押金一律显示净额**：购物车栏、详情卡 row meta、kv-cell 三处押金统一显示 `realGuaranty − guaranty_discount`（2 位四舍五入，避开 `300 - 299.95 = 0.04999...`）。`_refreshRentals` 派生 `_depositLabel = netDeposit`、`_depositInput = String(netDeposit)`；`_refreshSummary` 求和后 `deposit` / `reduce` 各再 round 一次避免累计误差。减免量单独标「已减免 -¥xxx」（不是「减免」，强调"已生效"）。`_applyPkgDeposit` 是 modal 编辑入口，把用户输入直接作为新的目录押金 + 清零 `guaranty_discount`；外部减免（会员/券）需走各自路径写 `guaranty_discount`。
+- **新页面不再引入 fui-* 组件**：项目计划逐步弃用 FirstUI（`fui-row` / `fui-col` / `fui-section` / `fui-button` 等）。新建或重做页面优先用纯 `view` + 自定义 wxss class（卡片 + flex 行 + 竖条标题模式，参考 `pages/order/payment_entry`）。vant-weapp（`van-button` / `van-popup` / `van-tree-select` / `van-calendar` 等）项目仍在用，可继续引入；旧页面里的 fui 不强制立刻拆除，但维护时遇到就尽量替换为纯 CSS 等效形态。
+- **顾客扫码支付落地页（`pages/order/payment_entry`）布局规范**：
+  - 整页背景 `#F8F8F8`，4 段卡片结构：A 订单信息 / B 业务明细（按 `order.type` 区分） / C 金额 / D 支付按钮。卡片白底 + `12rpx` 圆角 + `24rpx` 内边距，无阴影。
+  - 分组标题：左侧 `6rpx` 蓝色（`#2EA6D0`）竖条 + `30rpx` 半粗体（`.section-title::before` 伪元素）。
+  - 强调色：主色 `#2EA6D0`（按钮、竖条）/ 警示红 `#E64340`（需要支付金额、支付成功提示）。
+  - B 段业务明细仅对识别的 `order.type` 渲染；未识别 type（餐饮 / 零售 / 押金等本期未做）走最小版（A + C + D 三段不报错）。
+  - 租赁类型下：Rental 主行 = 商品名 + `N 件▾` + 押金/日租金一行（`.fee-row` + `.fee-group`，押金/日租金各 `300rpx` 列宽，按 5 位数字 `¥99999.00` 预算），点击 toggle 展开/收起。明细只列 **编码 / 名称 / 品类** 三字段，**不显示**取/还时间和状态。
+  - 折叠用手写 `wx:if` + `bindtap` 切换 `rental.expanded`，不引入 `van-collapse` 等组件以保持轻量。
 
 ## 通用结算页设计约定
 
@@ -157,20 +166,24 @@ dotnet run
   - `components/order-summary-card/` — 可折叠订单卡，调 `getOrderByStaffPromise` 拉单，展示 rentals.name；缺失时用 `getPackagePromise` / `getRentCategoryPromise` 补全
   - `components/order-payment/` — 微信/支付宝/其他三选一。微信走 `Order/GetWepayPayment/{id}` + `MediaHelper/GetQRCode` + WebSocket 监听 `paymentpaid`；**支付宝当前 mock 成微信二维码**（标了 `// TODO: 切换到支付宝小程序后替换`）；其他方式弹红色「确认收款」按钮 → `wx.showModal` 二次确认 → `Order/EffectUnpaidOrder?payMethod=...&payLater=false`。支付完成统一 `triggerEvent('paid', {orderId, payMethod, order})`，父页面后续处理待定
 - **页面 UI 约束**：用 `@import "/pages/template/stitch/tokens.wxss"`；**不要再画自定义 topbar**（小程序默认导航栏已有，画两个会重复）；`util.showAmount` 返回值已带 `¥` 前缀，拼接时勿再加；底部需挂 `<reception-tabbar active="open"/>` 否则 tab 栏消失
+- **订单号显示**：订单卡片副标题用 `#{{order.code || order.id}}`。`order.code` 由服务端 `OrderController.GenerateOrderCode` 生成：`{shopCode}_{bizCode}_{yyMMdd}_{序号5位}`（如 `WL_ZL_260511_00001`，租赁 bizCode=ZL，序号 = 同前缀订单数+1），仅在 `valid=1` 时生成（`UpdateOrder` 自动触发或 `PlaceRentOrder` 显式调用）。未 placed 订单回退到内部 id 兼容历史数据
+- **结算闭环约定**：业务页面的 `onCheckout` 必须串成 `await saveRentReceptOrder() → Order/PlaceRentOrder/{id} → setData({ order: rentOrder }) → wx.navigateTo settle`。先 await 落盘是为了规避用户改完字段立即点结算时、syncRent 触发的保存还在飞行的竞态。`saveRentReceptOrder` 返回 Promise（成功 resolve(submitted)、失败 reject）；fire-and-forget 调用点（`onSyncRent` / `_appendRentals`）必须补 `Promise.resolve(this.saveRentReceptOrder()).catch(() => {})` 吞 rejection
 
 ---
 
-## 当前状态（截至 2026-05-05 下午）
+## 当前状态（截至 2026-05-12 下午）
 
-**已可走通**：录入订单 → 选店 → 进入租赁开单 → 添加套餐（按品类筛选 + 万龙系店铺默认「立即租赁」+ 雪服/护具等非编码品类默认勾选「无编码」+ 创建时 startTime 默认当前时分）→ 购物车展示（rental 折叠态紧凑单行；展开态两层标题 + 跑马灯；rental 级 + rentItem 级双层完整性 chip；不完整时套餐名变红）→ 卡片展开编辑详情（套餐备注 + 起租日期 van-calendar 弹窗 + 今/明高亮快捷按钮 + 起租时间 picker；选租赁模式自动联动起租日期/时间：立即/先租后取=今天+当前时分、延时=明天+00:00；无编码/不需要 disabled 联动 + 不需要时整卡灰显）→ 装备编码录入（点编码区开搜索 modal，按品类模糊搜索租赁物，单选确认后回填 code/name/category_id/rent_product_id/class_name + 重复编码校验；扫码仍然可用）→ 套餐选模式时未自选 item 跟随 + 内部模式不一致显示 ⚠ → 左划删除 → 底部 4 个快捷入口横向紧凑按钮 + 单行结算条（件数徽章 + 押金 + 租金 + 去结算按钮，全部 rental 完整才允许点击）→ 小程序客户端所有 `wx.request` 的 `POST` 请求在全局请求层统一对 payload 内 URL 编码中文执行 `urldecode`（含嵌套对象/数组）。每次结构变更/字段失焦自动 `Rent/SaveRentRecept` 同步后端，起租日期/时间通过 `start_date` (ISO datetime) 真持久化。
+**已可走通**：录入订单 → 选店 → 进入租赁开单 → 添加套餐（按品类筛选 + 万龙系店铺默认「立即租赁」+ 雪服/护具等非编码品类默认勾选「无编码」+ 创建时 startTime 默认当前时分）→ 购物车展示（rental 折叠态紧凑单行；展开态两层标题 + 跑马灯；rental 级 + rentItem 级双层完整性 chip；不完整时套餐名变红）→ 卡片展开编辑详情（套餐备注 + 起租日期 van-calendar 弹窗 + 今/明高亮快捷按钮 + 起租时间 picker；选租赁模式自动联动起租日期/时间：立即/先租后取=今天+当前时分、延时=明天+00:00；无编码/不需要 disabled 联动 + 不需要时整卡灰显）→ 装备编码录入（点编码区开搜索 modal，按品类模糊搜索租赁物，单选确认后回填 code/name/category_id/rent_product_id/class_name + 重复编码校验；扫码仍然可用）→ 押金/租金点击 tap 弹 `wx.showModal` 二次确认编辑（押金净额显示 = `realGuaranty − guaranty_discount`，下方购物车栏「押金 ¥净额 已减免 -¥xxx」）→ 套餐选模式时未自选 item 跟随 + 内部模式不一致显示 ⚠ → 左划删除 → 底部 4 个快捷入口横向紧凑按钮 + 单行结算条（件数徽章 + 押金 + 已减免 + 租金 + 去结算按钮，全部 rental 完整才允许点击）→ 点「去结算」先 await `saveRentReceptOrder` 落盘最新编辑、再调 `Order/PlaceRentOrder/{id}` 让服务端 `GenerateOrderCode` 生成 `WL_ZL_yyMMdd_xxxxx` 正式订单号 + `valid=1` + 写 Guaranty，返回的 order 回填 `this.data.order` → 跳 `/pages/payment/settle/index?orderId=...` → 结算页订单卡显示 `order.code || order.id` + 三选一支付方式（微信扫码 / 支付宝 mock / 其他确认收款）→ **顾客扫支付二维码进入 `pages/order/payment_entry`：轻量化纯 CSS 卡片版（订单信息 / 租赁内容折叠 / 金额 / 微信支付按钮），租赁明细只列 编码/名称/品类，押金 + 日租金同行各 300rpx 列宽** → 小程序客户端所有 `wx.request` 的 `POST` 请求在全局请求层统一对 payload 内 URL 编码中文执行 `urldecode`（含嵌套对象/数组）。每次结构变更/字段失焦自动 `Rent/SaveRentRecept` 同步后端，起租日期/时间通过 `start_date` (ISO datetime) 真持久化。
 
 **关键文件**
-- 页面：`pages/admin/reception/recept_entry`、`recept_new`、`recept_package`
-- 组件：`components/reception/rent_recept_form`（购物车 + 详情卡片 + 日历 modal + 编码搜索 modal）、`components/reception/search_product_fuzzy`（编码搜索弹窗，可复用）
-- 数据接口（已对接）：`Order/GetShops`、`Rent/GetRentPackageList`、`Rent/GetRentPackage/{id}`、`Rent/GetRentPriceList`、`Rent/SaveRentRecept`、`Order/GetShopByName`、`Rent/GetRentProductFuzzy`、`Rent/GetTopRentCategories`、`Rent/GetSubRentCategories/{id}`、`Rent/GetRentCategory/{id}`
+- 页面：`pages/admin/reception/recept_entry`、`recept_new`、`recept_package`、`pages/order/payment_entry`（顾客扫码支付落地页）
+- 组件：`components/reception/rent_recept_form`（购物车 + 详情卡片 + 日历 modal + 编码搜索 modal）、`components/reception/search_product_fuzzy`（编码搜索弹窗，可复用）、`components/order-summary-card` + `components/order-payment`（结算页订单卡 + 二维码组件）
+- 数据接口（已对接）：`Order/GetShops`、`Rent/GetRentPackageList`、`Rent/GetRentPackage/{id}`、`Rent/GetRentPriceList`、`Rent/SaveRentRecept`、`Order/GetShopByName`、`Rent/GetRentProductFuzzy`、`Rent/GetTopRentCategories`、`Rent/GetSubRentCategories/{id}`、`Rent/GetRentCategory/{id}`、`Order/GetOrderFromPaymentByCustomer/{paymentId}`、`Order/WechatPayByOrderPayment/{paymentId}`
 
 **下一步要做的**
 - ✅ 第五步：支付结算页 mvp 完成（settle/index + order-summary-card + order-payment，微信支付走通、支付宝 mock、其他方式确认收款）
+- ✅ 顾客扫码支付落地页（`pages/order/payment_entry`）轻量化重做 + 租赁订单友好展示
+- payment_entry 其它订单类型友好展示（餐饮 / 零售 / 押金等当前走最小版，留待后续按业务需要扩展）
 - 第五步剩余：支付宝小程序对接（替换当前 mock）、支付完成后父页面 `onPaid` 处理（跳转 `rent_details` 或工作台）
 - 第二步剩余：扫描条码（`Rent/QueryByBarcode`）入口（目前仅 toast 占位）
 - 第二步：去结算按钮入口（已在 `onCheckout` 接通 `Order/PlaceRentOrder` + navigateTo settle）
@@ -192,6 +205,10 @@ dotnet run
 - 结算页支付宝当前为微信二维码 mock，扫码会按微信支付完成（已标 TODO，等支付宝小程序方案落地）
 - 结算页 `onPaid` 仅 `console.log`，未做跳转/刷新；父页面后续处理待定
 - 支付组件 WebSocket 仅在选中微信/支付宝并生成二维码后开启；切换支付方式时关闭旧 socket 再开新的，若用户在 prepay 调用中途切换会有短暂残留请求（无功能影响）
+- `pages/order/payment_entry` 目前仅对 `order.type=='租赁'` 做友好明细展示（编码/名称/品类 + 押金/日租金）；餐饮/零售/押金等其它类型走"最小版"（订单信息 + 金额 + 按钮），后续按业务需要扩展
+- payment_entry 折叠交互手写 `wx:if`，未引入 `van-collapse` 等组件以保持轻量；一个 Rental 内 rentItem 数量上限按 ~10 件设计
+- payment_entry 押金/日租金列宽固定 `300rpx`（5 位数字预算 `¥99999.00`），超出会被挤压；如业务出现万元以上押金需要回来调
+- payment_entry `pay()` 内成功回调里第二次拉单时把 `payment.id` 当成 paymentId 传，但拉回来的对象是新的 order（含 nonce 等微信字段已是 undefined），这一段是历史代码，本轮 UI 改造未触碰，留待后续清理
 
 ---
 
@@ -444,3 +461,59 @@ dotnet run
 - 流程：tap → `wx.showModal({editable:true, content: 当前值})` → 输入 → 第二个 modal 确认金额 → `_applyPkgDeposit` / `_applyPkgRate`
 - 📌 押金 round-trip 坑：服务端不保留 `realGuaranty`，`_refreshRentals` 用 `realGuaranty ?? guaranty` 取值。`_applyPkgDeposit` 必须同时设 `guaranty=v` + `guaranty_discount=0`，否则 sync 回来 UI 被刷回旧值。租金存在 `pricePresets[0].price`，服务端原样返回，无此问题
 - 加 `.kv-cell--tap:active` 按压反馈样式
+
+### 2026-05-11（晚上） — 押金净额显示 + 订单号回填 + 结算闭环
+
+主要文件：
+- 改 `components/reception/rent_recept_form/{js,wxml}`
+- 改 `components/order-summary-card/index.wxml`
+- 改 `pages/admin/reception/recept_new.js`
+
+#### 一、押金显示改为净额
+- ✅ **`_refreshRentals` 派生 `netDeposit`**：`realGuaranty − guaranty_discount`，`Math.round(x * 100) / 100` 规避 `300 − 299.95 = 0.04999...` 浮点；`_depositLabel` / `_depositInput` 都改用 netDeposit。`realGuaranty <= 0` 时取 0（新建无目录的 rental）
+- ✅ **`_refreshSummary` 求和后再 round**：`deposit` / `reduce` 各 `Math.round(* 100) / 100`，避免多 rental 累加放大浮点误差
+- ✅ **购物车栏文案「减免」→「已减免」**（`rent_recept_form.wxml`）告诉用户减免已生效，不需要再操作
+- ✅ **合并冲突清理**：白天 commit f06a21b 的 modal-tap 写法与本地基于旧 input blur 假设的改动冲突。保留 modal-tap（`onPkgDepositTap`/`_applyPkgDeposit`），丢弃 blur 分支（wxml 已不是 input，blur 分支代码跑不到）
+
+#### 二、订单号显示正式编号
+- ✅ **`order-summary-card/index.wxml`**：`#{{order.id}}` → `#{{order.code || order.id}}`，下单后展示 `WL_ZL_260511_00001` 服务端生成码；未 placed 回退到内部 id 兼容历史数据
+- 📌 **服务端码规则**（`SnowmeetApi/Controllers/OrderController.cs:389 GenerateOrderCode`）：`{shopCode}_{bizCode}_{yyMMdd}_{序号5位}`，租赁 `bizCode=ZL`，序号按同前缀订单数+1。仅在 `UpdateOrder` 看到 `code==null && valid==1`、或 `PlaceRentOrder` 显式调用时生成
+
+#### 三、结算闭环
+- ✅ **`saveRentReceptOrder` 改返 Promise**：成功 `resolve(submitted)`，失败 `reject(err)`；fire-and-forget 调用点（`onSyncRent` / `_appendRentals`）补 `Promise.resolve(this.saveRentReceptOrder()).catch(() => {})` 吞掉 rejection，避免 unhandled rejection 警告
+- ✅ **`onCheckout` 串成完整链**：
+  1. `await` `saveRentReceptOrder`（确保最新编辑落盘，规避用户改完押金立即点结算、syncRent 触发的保存还在飞行的竞态）
+  2. 调 `Order/PlaceRentOrder/{order.id}` → 服务端 `GenerateOrderCode` + `valid=1` + 写 Guaranty + 算 `paying_amount`
+  3. `setData({ order: rentOrder })` 回填本地，含新生成的 `code`
+  4. `wx.navigateTo` 跳 `/pages/payment/settle/index?orderId=...`
+- ✅ **统一 loading + catch 兜底**，失败 toast「下单失败」
+
+### 2026-05-12 — payment_entry 顾客扫码支付页轻量化重做
+
+主要文件：`pages/order/payment_entry/{js,wxml,wxss}`
+
+入口：顾客扫店员侧的支付二维码（由 `components/order-payment` 或 `components/payment/payment.js` 生成，URL 形如 `https://mini.snowmeet.top/mapp/order/payment_entry?paymentId={id}`）落地到本页。原页面只有 5 行裸 `view` + `van-button`，视觉粗糙、缺业务明细。
+
+- ✅ **舍弃 fui-* 改纯 CSS 卡片布局**
+  - 整页背景 `#F8F8F8`；信息分 4 段卡片（订单信息 / 租赁内容 / 金额 / 支付按钮），白底 + `12rpx` 圆角 + `24rpx` 内边距，无阴影
+  - 分组标题：左侧 `6rpx` 蓝色竖条 + `30rpx` 半粗体（替代 `fui-section`，靠 `::before` 伪元素实现）
+  - 行 (`.row`)：flex space-between，标签 `#666` 左 / 值 `#333` 右；金额行类 `.value--amount`、需支付红色高亮 `.value--pay`（`#E64340 + 32rpx + 600`）
+  - 主色 `#2EA6D0`（按钮、竖条）/ 警示红 `#E64340`（需要支付金额、支付成功提示）
+- ✅ **租赁明细折叠交互**（手写 wx:if，未引入 `van-collapse`）
+  - Rental 主行 `bindtap="toggleRental"` 切换；右上角 `▾` icon，展开时 rotate 180°（`.rental-head--open`）
+  - `payment_entry.js` 新增 `toggleRental(e)`：`setData({['order.rentals[' + idx + '].expanded']: !this.data.order.rentals[idx].expanded})`
+  - 默认折叠（`rental.expanded = false`）；展开后浅灰底 `#FAFAFA` 圆角块内列各 rentItem
+- ✅ **租赁卡内容**（按用户多轮反馈最终形态）
+  - Rental 主行：`displayName` + `N 件▾` + 押金/日租金一行（`.fee-row` + `.fee-group`，各占 `300rpx` 按 5 位数字预算 `¥99999.00` 对齐）
+  - rentItem 明细只列：**编码**（`item.code`）/ **名称** / **品类**（`category.name || class_name || '-'`）。**舍弃**取/还时间和状态字段（用户明确不要）
+- ✅ **`renderData(order)` 扩展**
+  - 新增 `order.total_amountStr = util.showAmount(order.total_amount)`
+  - `order.type == '租赁'` 时遍历 `order.rentals` 派生：`displayName`（`rental.name || rentItems[0].name || '租赁'`）、`guarantyStr`、`totalRentalAmountStr`、`expanded=false`；每个 rentItem 派生 `categoryName`
+- ✅ **不动的部分**
+  - `onLoad` / `onShow` / `pay()` 全部保留；入参解析（`options.paymentId` 或 `options.q` 二维码 scene）保持原样
+  - 后端 API 未动（复用 `Order/GetOrderFromPaymentByCustomer/{paymentId}` 拉单 + `Order/WechatPayByOrderPayment/{paymentId}` 调起支付）
+  - `van-button` 沿用（项目仍保留 vant-weapp，仅 fui-* 是计划弃用对象）
+- ✅ **非租赁类型最小版**：`B 段租赁内容` wx:if `order.type=='租赁'` 跳过；餐饮/零售/押金等仅渲染 订单信息 + 金额 + 按钮三段，留待后续扩展
+- 📌 **`pay()` 内的旧 bug 顺手未改**：`pay()` 第二次拉单时把 `payment.id` 当成 paymentId 传，但拉回来的字段是 `nonce/prepay_id/sign/timestamp`，第二次读这些就是 undefined。本次不在范围内，保留原状
+
+**plan 文件**：`/Users/cangjie/.claude/plans/pages-order-payment-entry-valiant-sky.md`
