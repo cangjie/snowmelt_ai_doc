@@ -171,7 +171,7 @@ dotnet run
 
 ---
 
-## 当前状态（截至 2026-05-12 下午）
+## 当前状态（截至 2026-05-14 凌晨）
 
 **已可走通**：录入订单 → 选店 → 进入租赁开单 → 添加套餐（按品类筛选 + 万龙系店铺默认「立即租赁」+ 雪服/护具等非编码品类默认勾选「无编码」+ 创建时 startTime 默认当前时分）→ 购物车展示（rental 折叠态紧凑单行；展开态两层标题 + 跑马灯；rental 级 + rentItem 级双层完整性 chip；不完整时套餐名变红）→ 卡片展开编辑详情（套餐备注 + 起租日期 van-calendar 弹窗 + 今/明高亮快捷按钮 + 起租时间 picker；选租赁模式自动联动起租日期/时间：立即/先租后取=今天+当前时分、延时=明天+00:00；无编码/不需要 disabled 联动 + 不需要时整卡灰显）→ 装备编码录入（点编码区开搜索 modal，按品类模糊搜索租赁物，单选确认后回填 code/name/category_id/rent_product_id/class_name + 重复编码校验；扫码仍然可用）→ 押金/租金点击 tap 弹 `wx.showModal` 二次确认编辑（押金净额显示 = `realGuaranty − guaranty_discount`，下方购物车栏「押金 ¥净额 已减免 -¥xxx」）→ 套餐选模式时未自选 item 跟随 + 内部模式不一致显示 ⚠ → 左划删除 → 底部 4 个快捷入口横向紧凑按钮 + 单行结算条（件数徽章 + 押金 + 已减免 + 租金 + 去结算按钮，全部 rental 完整才允许点击）→ 点「去结算」先 await `saveRentReceptOrder` 落盘最新编辑、再调 `Order/PlaceRentOrder/{id}` 让服务端 `GenerateOrderCode` 生成 `WL_ZL_yyMMdd_xxxxx` 正式订单号 + `valid=1` + 写 Guaranty，返回的 order 回填 `this.data.order` → 跳 `/pages/payment/settle/index?orderId=...` → 结算页订单卡显示 `order.code || order.id` + 三选一支付方式（微信扫码 / 支付宝 mock / 其他确认收款）→ **顾客扫支付二维码进入 `pages/order/payment_entry`：轻量化纯 CSS 卡片版（订单信息 / 租赁内容折叠 / 金额 / 微信支付按钮），租赁明细只列 编码/名称/品类，押金 + 日租金同行各 300rpx 列宽** → 小程序客户端所有 `wx.request` 的 `POST` 请求在全局请求层统一对 payload 内 URL 编码中文执行 `urldecode`（含嵌套对象/数组）。每次结构变更/字段失焦自动 `Rent/SaveRentRecept` 同步后端，起租日期/时间通过 `start_date` (ISO datetime) 真持久化。
 
@@ -192,6 +192,10 @@ dotnet run
 - 支付前身份验证（PRD 1.4.5 + 1.4.1）— plan 已审批待开工，见 `snowmeet_ai_doc/payment_identity_verification_plan.md`：后端加 `Order.pay_member_id` + `Order.is_proxy_pay` + 新建 `PaymentIdentityController`；小程序 `payment_entry` 改造 + 新建 `pay-identity-confirm` 组件
 
 **已知遗留**
+- **macOS 上 pyodbc + msodbcsql18**：unixODBC 默认查 `/etc/odbcinst.ini` 但 brew 装的 msodbcsql18 注册在 `/opt/homebrew/etc/odbcinst.ini`。所有 pyodbc 脚本启动前要 `export ODBCSYSINI=/opt/homebrew/etc`（写到 shell rc 或脚本 wrapper 都行）。已在 `snowmeet_ai_doc/skills/export_rent_order/SKILL.md` 文档化
+- **数据库里 rental_detail.charge_type 只有'租金'、'超时费'、'赔偿金'三种值**：用户口语的'损坏赔偿'实际是'赔偿金'。新查询写 `IN ('赔偿金','损坏赔偿')` 兼容
+- **discount 归属计算用"detail 级 + 非 detail rental 级"严格归一**：详见 `snowmeet_ai_doc/skills/export_rent_order/SKILL.md` 减免金额定义。直接 `order_id` 匹配会让多 rental 订单的全单 discount 在每条 rental 上重复计入
+- **租赁数据导出脚本现状**：`snowmeet_ai_doc/export_wanlong_rent_orders.py` 是旧的万龙单店脚本（保留作历史）；`snowmeet_ai_doc/skills/export_rent_order/export_rent_orders.py` 是通用版本（任何店铺）。维护时改通用版，旧脚本不再演进
 - `needIntercom`（雪板类租赁默认加对讲机）相关逻辑已注释，未来需要时可恢复
 - `recept_new.onMemberDetail` 仍跳转旧版 `pages/admin/recept/recept_member_info`，待新版会员详情页完成后切换
 - `_modeFromPkg` 是组件内部临时字段（`_` 前缀，由 `stripUI` 过滤），不持久化；页面重载后所有 item 视为"已自选模式"，不会再被套餐传导覆盖（保守、符合预期）
@@ -542,3 +546,75 @@ dotnet run
 - 万龙微信支付分 3 商户：1604184933(万龙租赁，主力 67% / 1349 笔 ¥483 万) / 1636313350(旗舰租赁 / 316 笔 ¥83 万 — 历史遗留) / 1636404775(万龙零售 / 9 笔 ¥1.1 万)
 - Excel 明细 ¥250 万 vs CSV ¥53 万 差 ¥197 万，主因是 `rental.settled=0` 的未归还订单（如 `WT_ZL_251030_00009` "试滑双板(有用勿删)" / "测试" 已付 ¥0.04 但 rental_detail 累积 189 天 ¥7-9 万虚账）
 - 微信开发者工具 `getPhoneNumber` 不返真实号，身份验证测试必须真机；建议加 `?mockCell=` 开发后门
+
+### 2026-05-13 晚 ~ 2026-05-14 — 接口排查 + xlsx 重构 + skill 落地
+
+接续下午的万龙租赁导出工作。本次三条主线：诊断接口数据为何在前端报表里看不见、把导出脚本通用化成 skill、把今晚的对账逻辑（测试列+临时订单+异常标红）固化进 skill。
+
+#### 一、`api/Rent/GetConfirmedRentOrder` 接口数据排查
+
+主要文件：`SnowmeetApi/wwwroot/background/rent/rent_report_new.html` + 直查 DB
+
+- 📌 用户报告 `WT_ZL_260314_00006` "查不出来"，DB 直查所有字段都满足接口 5 条规则；本地起 SnowmeetApi 用真实 sessionKey 调接口 — **数据确实返回**（rows=89, has_target=True）
+- 📌 真正根因 1：`rent_report_new.html:87-91` 的 var 提升 bug — `var tData = []; render(); var totalAmount = 0` — `render()` 在 `totalAmount` 赋值前调用，264 行 `totalAmount.toFixed(2)` 因 undefined 抛错。修：把 `var totalAmount = 0` 移到 `render()` 之前一行
+- 📌 真正根因 2：这条订单 `rental.entertain=true`，`rent_report_new.html:123` 的 `if (rental.entertain != 0) continue` 把它跳过（招待单不计入"租赁订单报表"，业务语义正确）
+- 📌 类似根因覆盖更多订单：
+  - `WT_ZL_260316_00004`（"5 条 5 标签都未命中"之一）：`totalRentalAmount=220` 被 220 的 rental 级减免（biz_type='租赁' AND biz_id=rental.id）抵消为 0，前端 `>= 1` 过滤掉
+  - `WT_ZL_260103_00013`：rental_detail 中 `charge_type='租金'` 的明细 `valid=0` 失效，仅剩 `超时费 120` 有效。`totalRentalAmount`（按 valid=1 求和）= 0 被过滤；120 元收入实为超时费不是租金，数据质量问题
+
+#### 二、csv_excel_diff.xlsx「应通过但CSV没有」sheet 加分类列
+
+把 194 行可能的 CSV 漏单按规则归类（DB 实时查 rental/discount/rental_detail）。新增 6 列：
+
+| 列 | 规则 | 命中数 |
+|---|---|---|
+| 招待 | `rental.entertain=1` | 18 |
+| 体验 | `rental.experience=1` | 74 |
+| 减免 | `discount.sub_biz_type='日租金' AND biz_id=rental.id` 总和 | 48 |
+| 免除 | 该 rental 在 rental_detail 中无 `valid=1` 明细 | 48 |
+| 测试 | `_订单已付金额 < 10` | 31 |
+| 减免2 | `discount.biz_type='租赁' AND biz_id=rental.id` 总和（不限 sub_biz_type） | 49 |
+
+剩 6 条 5 标签都不命中的核心样本中，已在第一节定位到 2 条根因（260316 / 260103）；其余 3 条（`WT_ZL_251205_00004` / `WT_ZL_251230_00009` / `WT_ZL_260212_00013` 等）的 `discount.order_id` 全 NULL，没 discount 记录，减免不是 CSV 缺失的根因，需另查
+
+#### 三、wanlong_rent_orders xlsx 重构（订单明细 9→15 列 + 3 sheet 测试列 + 对账后处理）
+
+主要文件：`snowmeet_ai_doc/export_wanlong_rent_orders.py`
+
+- 走 plan mode 评审（plan 文件 `~/.claude/plans/wanlong-rent-orders-2025-10-15-2026-04-rustling-whistle.md`）
+- ✅ 修 `OUT` 路径 Windows → macOS 绝对路径
+- ✅ pyodbc ODBC 驱动注册：brew 装的 msodbcsql18 + unixodbc 配置在 `/opt/homebrew/etc/odbcinst.ini`，但 pyodbc 默认查 `/etc/odbcinst.ini` → 解决方案 `export ODBCSYSINI=/opt/homebrew/etc`（比改 `~/.odbcinst.ini` 更轻量）
+- ✅ DETAIL_SQL 重构 14 列：新增 `是否招待 / 是否体验 / 应付租金 / 减免金额 / 损毁赔偿 / 实付金额`。损毁赔偿用 `charge_type IN ('赔偿金','损坏赔偿')` 兼容（DB 实际只有'赔偿金'，没有'损坏赔偿'）
+- ✅ **减免金额最终口径**（用户拍板，每条 rental 严格归属自己的 discount）：
+  - A：`discount.sub_biz_id` 指向该 rental 的某个 `rental_detail`（`valid=1`）
+  - B：`discount.biz_type='租赁' AND discount.biz_id=rental.id`，且 `sub_biz_id` 不指向该 rental 的任何 detail
+  - A ∪ B 取 distinct discount row 求和。**每条 discount 只归一条 rental**，多 rental 单子不重复算
+- ✅ 实付金额 = 应付租金 − 减免金额 + 超时费 + 损毁赔偿
+- ✅ 3 个 sheet 都加测试列：规则统一为 `订单的 paid_amount < 5` OR `店员姓名含 '苍'`
+  - 订单汇总 333 行 / 订单明细 531 行 / 支付明细 95 行
+- ✅ 对账后处理：「订单结余 != 订单明细该订单非测试 rental 实付合计」差额 ≥ 0.01 → 订单号标红
+  - A 类（结余>0 但订单明细无非测试 rental 行）135 条 → 加「临时订单」列='是'，订单号不标红
+  - B 类（rental 存在但金额对不上）23 条 → 订单号标红（B 类负差额大多是 `rental.settled=0` 虚账，正差额是付款进账但 rental_detail 没记够）
+
+#### 四、固化为 skill：`snowmeet_ai_doc/skills/export_rent_order/`
+
+通用化版本，未来导其他店铺/时间段直接复用。
+
+- 新建 `snowmeet_ai_doc/skills/export_rent_order/SKILL.md`（8.5 KB，触发条件 + 环境要求 + 调用方式 + 列结构 + 排错全套文档）
+- 新建 `snowmeet_ai_doc/skills/export_rent_order/export_rent_orders.py`（15 KB，argparse 参数化：`--shop --start --end --out --conn --no-postprocess`）
+- 已知 6 个店铺预置英文 prefix 映射（`万龙体验中心→wanlong / 万龙服务中心→wanlong_service / 渔阳→yuyang / 南山→nanshan / 怀北→huaibei / 崇礼旗舰店→chongli`），默认输出文件名 `{prefix}_rent_orders_{start}_{end}.xlsx`
+- 后处理 `post_process` 函数内化了"临时订单不会标红"的互斥规则（A 类 `continue` 掉，永远不进标红分支）
+- 冷启动验证：换机后只需 `brew install msodbcsql18 unixodbc + pip install pyodbc openpyxl + export ODBCSYSINI=/opt/homebrew/etc`
+
+#### 五、聊天记录归档
+
+新建 `snowmeet_ai_doc/sessions/2026-05-13_rent_order_diff_and_skill.md`（9 KB），把今晚 7 个主题完整记录（接口排查 → 分类列 → xlsx 重构 → 测试列 → 标红 → 临时订单 → skill 落地）+ 关键改动文件清单 + 6 条小知识
+
+📌 关键发现 / 教训：
+- **macOS pyodbc 看不到驱动**：`export ODBCSYSINI=/opt/homebrew/etc` 一行解决，不要碰系统 odbcinst.ini
+- **var 提升只前置声明不前置赋值**：`var x = 0` 在 `render()` 后面 → render 内拿到 `undefined.toFixed()`。所有顶层初始化必须放在第一次调用前
+- **discount 表三字段在生产实际同时填**：万龙时段 274 条 discount 全部填了 `order_id + biz_type='租赁' biz_id + sub_biz_type='日租金' sub_biz_id`，所以三 bucket 完全重叠；但脚本逻辑要按字面分类做，应付未来字段稀疏
+- **rental_detail.charge_type 只有'租金/超时费/赔偿金'三种值**：DB 不存在'损坏赔偿'，写 SQL 用 `IN ('赔偿金','损坏赔偿')` 兼容
+- **rental_detail.valid=0 的失效租金明细会让 totalRentalAmount=0**：前端用 `>= 1` 过滤掉整行，是部分订单"CSV 没有"的根因（数据质量问题，非脚本 bug）
+- **多 rental 订单 discount 归属必须严格按 detail/rental 层级匹配**：不能简单 `order_id OR biz_id OR sub_biz_id` 三 bucket OR，否则全单 discount 在每条 rental 上重复算（如 WT_ZL_251230_00011 ¥879.95 会变 ×6=¥5279.70）
+- **rental.settled=0 的虚账**：未归还订单按天累积 `rental_detail.amount` 应收记录，做收入分析时要意识到「订单明细.租金总额」可能远超实际应收。报表只看 ≤ 实付金额、不参考租金总额做收入估算

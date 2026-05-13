@@ -1,22 +1,47 @@
-"""万龙体验中心 2025-10-15 ~ 2026-04-15 租赁订单 汇总+明细 导出"""
-import pyodbc, sys, os
-from datetime import datetime
-from openpyxl import Workbook
+#!/usr/bin/env python3
+"""按店铺导出租赁订单 xlsx（订单汇总 / 订单明细 / 支付明细），含测试单标记 + 临时订单分类 + 对账标红。
+
+用法：
+    python3 export_rent_orders.py --shop 万龙体验中心 --start 2025-10-15 --end 2026-04-15
+    python3 export_rent_orders.py --shop 渔阳 --start 2026-01-01 --end 2026-03-31 --out yuyang_q1.xlsx
+
+环境要求（macOS）：
+    brew install unixodbc msodbcsql18
+    pip install pyodbc openpyxl
+    export ODBCSYSINI=/opt/homebrew/etc   # 让 pyodbc 看到 ODBC Driver 18
+
+数据库连接默认硬编码到生产，密码也在脚本里。换库时可用 --conn 覆盖或改 DEFAULT_CONN。
+"""
+import argparse
+import os
+import sys
+from datetime import datetime, timedelta
+
+import pyodbc
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-CONN = ('DRIVER={ODBC Driver 18 for SQL Server};SERVER=tcp:100.28.143.19,1433;'
-        'DATABASE=snowmeet_new;UID=claude;PWD=abcd123!@#;'
-        'Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;')
-SHOP = '万龙体验中心'
-START = '2025-10-15'
-END_EXCL = '2026-04-16'
-OUT = '/Users/cangjie/source/snowmeet/snowmeet_ai/snowmeet_ai_doc/wanlong_rent_orders_2025-10-15_2026-04-15.xlsx'
+DEFAULT_CONN = (
+    'DRIVER={ODBC Driver 18 for SQL Server};SERVER=tcp:100.28.143.19,1433;'
+    'DATABASE=snowmeet_new;UID=claude;PWD=abcd123!@#;'
+    'Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;'
+)
 
 # 退款条件：state=1 OR refund_id 非空（与 RentOrder.cs:519 旧代码一致）
 REFUND_COND = "(pr.state = 1 OR (pr.refund_id IS NOT NULL AND pr.refund_id <> ''))"
+
+# 已知店铺中文 → 文件名前缀（输出文件名默认 {prefix}_rent_orders_{start}_{end}.xlsx）
+SHOP_PREFIX = {
+    '万龙体验中心': 'wanlong',
+    '万龙服务中心': 'wanlong_service',
+    '渔阳': 'yuyang',
+    '南山': 'nanshan',
+    '怀北': 'huaibei',
+    '崇礼旗舰店': 'chongli',
+}
 
 SUMMARY_SQL = f"""
 SELECT
@@ -128,7 +153,6 @@ FROM base b
 ORDER BY b.ocrt ASC, b.oid ASC, b.rid ASC
 """
 
-# 每笔支付一行；mch_id 来自 wepay_key（仅微信支付填，其他为空）
 PAYMENT_SQL = f"""
 SELECT
     o.code                                                  AS 订单号,
@@ -184,45 +208,149 @@ def write_sheet(ws, title, header_color, headers, rows):
         max_len = sum(2 if ord(ch) > 127 else 1 for ch in str(headers[c - 1]))
         for r in range(2, min(len(rows), 200) + 2):
             v = ws.cell(row=r, column=c).value
-            if v is None: continue
+            if v is None:
+                continue
             s = v.strftime('%Y-%m-%d %H:%M') if isinstance(v, datetime) else str(v)
             wlen = sum(2 if ord(ch) > 127 else 1 for ch in s)
-            if wlen > max_len: max_len = wlen
+            if wlen > max_len:
+                max_len = wlen
         ws.column_dimensions[col].width = min(max_len + 2, 36)
 
 
+def post_process(out_path):
+    """对账后处理：
+    1. 订单汇总新增「临时订单」列：非测试订单中，订单结余 > 0 且订单明细无非测试 rental 行 → '是'
+    2. 订单结余 vs 订单明细实付合计差额 ≥ 0.01 且非临时订单 → 订单号 cell 浅红底 + 深红字
+    """
+    wb = load_workbook(out_path)
+    ws_sum = wb['订单汇总']
+    ws_det = wb['订单明细']
+    sum_h = [c.value for c in ws_sum[1]]
+    det_h = [c.value for c in ws_det[1]]
+    SUM_CODE = sum_h.index('订单号') + 1
+    SUM_BALANCE = sum_h.index('订单结余') + 1
+    SUM_TEST = sum_h.index('测试') + 1
+    DET_CODE = det_h.index('订单号') + 1
+    DET_PAID = det_h.index('实付金额') + 1
+    DET_TEST = det_h.index('测试') + 1
+
+    # 按订单号聚合订单明细的非测试 rental 实付合计
+    det_paid_sum = {}
+    for r in range(2, ws_det.max_row + 1):
+        if ws_det.cell(row=r, column=DET_TEST).value == '是':
+            continue
+        code = ws_det.cell(row=r, column=DET_CODE).value
+        paid = ws_det.cell(row=r, column=DET_PAID).value or 0
+        det_paid_sum[code] = det_paid_sum.get(code, 0) + paid
+
+    # 加「临时订单」列
+    tmp_col = ws_sum.max_column + 1
+    head_cell = ws_sum.cell(row=1, column=1)
+    new_head = ws_sum.cell(row=1, column=tmp_col, value='临时订单')
+    if head_cell.has_style:
+        from copy import copy
+        new_head.font = copy(head_cell.font)
+        new_head.fill = copy(head_cell.fill)
+        new_head.alignment = copy(head_cell.alignment)
+        new_head.border = copy(head_cell.border)
+
+    red_fill = PatternFill('solid', fgColor='FFC7CE')
+    red_color = 'C00000'
+
+    tmp_count = mismatch_count = 0
+    for r in range(2, ws_sum.max_row + 1):
+        if ws_sum.cell(row=r, column=SUM_TEST).value == '是':
+            continue
+        code = ws_sum.cell(row=r, column=SUM_CODE).value
+        balance = ws_sum.cell(row=r, column=SUM_BALANCE).value or 0
+        det_total = det_paid_sum.get(code)
+
+        # 临时订单：结余>0 但订单明细里 0 条非测试 rental 行
+        if det_total is None and balance > 0:
+            ws_sum.cell(row=r, column=tmp_col, value='是')
+            tmp_count += 1
+            continue
+
+        # 对账差异（剩余 rental 存在但金额不等）
+        if det_total is not None and abs(round(balance - det_total, 2)) >= 0.01:
+            cell = ws_sum.cell(row=r, column=SUM_CODE)
+            cell.fill = red_fill
+            old = cell.font
+            cell.font = Font(name=old.name, size=old.size, bold=old.bold,
+                             italic=old.italic, color=red_color)
+            mismatch_count += 1
+
+    wb.save(out_path)
+    return tmp_count, mismatch_count
+
+
+def default_out_name(shop, start, end):
+    prefix = SHOP_PREFIX.get(shop, shop)
+    return f'{prefix}_rent_orders_{start}_{end}.xlsx'
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description='导出某店铺某时间段的租赁订单 xlsx（含 3 个 sheet + 对账标记）',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    p.add_argument('--shop', required=True, help='店铺名（DB order.shop 字段值，如「万龙体验中心」）')
+    p.add_argument('--start', required=True, help='起始日期（inclusive），格式 YYYY-MM-DD')
+    p.add_argument('--end', required=True, help='截止日期（inclusive），格式 YYYY-MM-DD')
+    p.add_argument('--out', default=None, help='输出 xlsx 路径，默认按 {shop_prefix}_rent_orders_{start}_{end}.xlsx 生成在当前目录')
+    p.add_argument('--conn', default=DEFAULT_CONN, help='ODBC 连接字符串，默认连生产')
+    p.add_argument('--no-postprocess', action='store_true', help='跳过对账后处理（不加「临时订单」列、不标红）')
+    return p.parse_args()
+
+
 def main():
+    args = parse_args()
+    start = args.start
+    end_excl = (datetime.strptime(args.end, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+    out = args.out or default_out_name(args.shop, args.start, args.end)
+    out = os.path.abspath(out)
+
     print('连数据库 ...')
-    cn = pyodbc.connect(CONN)
+    cn = pyodbc.connect(args.conn)
     cur = cn.cursor()
 
-    print(f'查汇总（万龙 / {START} ~ {END_EXCL}） ...')
-    cur.execute(SUMMARY_SQL, SHOP, START, END_EXCL)
+    print(f'查汇总（{args.shop} / {start} ~ {end_excl}） ...')
+    cur.execute(SUMMARY_SQL, args.shop, start, end_excl)
     summary_cols = [c[0] for c in cur.description]
     summary_rows = cur.fetchall()
     print(f'  汇总: {len(summary_rows)} 行')
 
     print('查明细 ...')
-    cur.execute(DETAIL_SQL, SHOP, START, END_EXCL)
+    cur.execute(DETAIL_SQL, args.shop, start, end_excl)
     detail_cols = [c[0] for c in cur.description]
     detail_rows = cur.fetchall()
     print(f'  明细: {len(detail_rows)} 行')
 
     print('查支付明细 ...')
-    cur.execute(PAYMENT_SQL, SHOP, START, END_EXCL)
+    cur.execute(PAYMENT_SQL, args.shop, start, end_excl)
     pay_cols = [c[0] for c in cur.description]
     pay_rows = cur.fetchall()
     print(f'  支付明细: {len(pay_rows)} 行')
 
     cn.close()
 
-    print(f'写 Excel: {OUT}')
+    print(f'写 Excel: {out}')
     wb = Workbook()
     write_sheet(wb.active,        '订单汇总', '1F4E78', summary_cols, summary_rows)
     write_sheet(wb.create_sheet(), '订单明细', '2E7D32', detail_cols, detail_rows)
     write_sheet(wb.create_sheet(), '支付明细', 'B7791F', pay_cols,    pay_rows)
-    wb.save(OUT)
-    print(f'完成。文件大小: {os.path.getsize(OUT)/1024:.1f} KB')
+    wb.save(out)
+    size_kb = os.path.getsize(out) / 1024
+    print(f'  完成。文件大小: {size_kb:.1f} KB')
+
+    if not args.no_postprocess:
+        print('对账后处理 ...')
+        tmp_n, mis_n = post_process(out)
+        print(f'  临时订单标记: {tmp_n} 行')
+        print(f'  订单结余 ≠ 明细实付（订单号标红）: {mis_n} 行')
+
+    print(f'完成: {out}')
 
 
 if __name__ == '__main__':
