@@ -171,11 +171,7 @@ dotnet run
 
 ---
 
-<<<<<<< HEAD
-## 当前状态（截至 2026-05-14 晚）
-=======
-## 当前状态（截至 2026-05-14 晚上）
->>>>>>> 50ba79589195643a8395f648b59ac887ed9fe011
+## 当前状态（截至 2026-05-14 深夜）
 
 **已可走通**：录入订单 → 选店 → 进入租赁开单 → 添加套餐（按品类筛选 + 万龙系店铺默认「立即租赁」+ 雪服/护具等非编码品类默认勾选「无编码」+ 创建时 startTime 默认当前时分）→ 购物车展示（rental 折叠态紧凑单行；展开态两层标题 + 跑马灯；rental 级 + rentItem 级双层完整性 chip；不完整时套餐名变红）→ 卡片展开编辑详情（套餐备注 + 起租日期 van-calendar 弹窗 + 今/明高亮快捷按钮 + 起租时间 picker；选租赁模式自动联动起租日期/时间：立即/先租后取=今天+当前时分、延时=明天+00:00；无编码/不需要 disabled 联动 + 不需要时整卡灰显）→ 装备编码录入（点编码区开搜索 modal，按品类模糊搜索租赁物，单选确认后回填 code/name/category_id/rent_product_id/class_name + 重复编码校验；扫码仍然可用）→ 押金/租金点击 tap 弹 `wx.showModal` 二次确认编辑（押金净额显示 = `realGuaranty − guaranty_discount`，下方购物车栏「押金 ¥净额 已减免 -¥xxx」）→ 套餐选模式时未自选 item 跟随 + 内部模式不一致显示 ⚠ → 左划删除 → 底部 4 个快捷入口横向紧凑按钮 + 单行结算条（件数徽章 + 押金 + 已减免 + 租金 + 去结算按钮，全部 rental 完整才允许点击）→ 点「去结算」先 await `saveRentReceptOrder` 落盘最新编辑、再调 `Order/PlaceRentOrder/{id}` 让服务端 `GenerateOrderCode` 生成 `WL_ZL_yyMMdd_xxxxx` 正式订单号 + `valid=1` + 写 Guaranty，返回的 order 回填 `this.data.order` → 跳 `/pages/payment/settle/index?orderId=...` → 结算页订单卡显示 `order.code || order.id` + 三选一支付方式（微信扫码 / 支付宝 mock / 其他确认收款）→ **顾客扫支付二维码进入 `pages/order/payment_entry`：轻量化纯 CSS 卡片版（订单信息 / 租赁内容折叠 / 金额 / 微信支付按钮），租赁明细只列 编码/名称/品类，押金 + 日租金同行各 300rpx 列宽** → 小程序客户端所有 `wx.request` 的 `POST` 请求在全局请求层统一对 payload 内 URL 编码中文执行 `urldecode`（含嵌套对象/数组）。每次结构变更/字段失焦自动 `Rent/SaveRentRecept` 同步后端，起租日期/时间通过 `start_date` (ISO datetime) 真持久化。→ **顾客扫码 payment_entry 落地后增加支付前身份验证**：onShow 调 `PaymentIdentity/CheckPayerIdentity` 拉 5 状态 → 未绑手机号弹一键授权 / 订单已匹配别人弹「正常支付（订单转归我）」「替人代付（订单仍归原会员）」二选一 modal / 订单未匹配会员则确认「订单将归我」→ `ConfirmPayIdentity` 立即落库 `Order.member_id` / `OrderPayment.member_id` / `is_proxy_pay` / `wechat_unverified`（支付宝支付一律置 `wechat_unverified=true`）→ status 转 `direct` 后才显示原微信支付按钮。**支付宝手机号解密目前是 stub**（待支付宝小程序对接）。
 
@@ -738,3 +734,20 @@ dotnet run
 - 需求文档：[`payment_identity_verification_requirements.md`](payment_identity_verification_requirements.md)（业务视角，9 章节，PM 可读）
 - 实施方案：[`payment_identity_verification_plan.md`](payment_identity_verification_plan.md)（开发视角，覆盖前一天的 plan）
 - 可达性报告：[`unreachable_pages.md`](unreachable_pages.md)（待用户人工 review 决定删除范围）
+
+### 2026-05-14（深夜） — Claude Code hook 配置：start-work 前自动 pull / end-work 后自动 push
+
+主要文件：`.claude/settings.local.json`（仓库 `snowmeet_ai/` 下，本机 gitignore，不入库）
+
+- ✅ **PreToolUse / Skill(start-work)** → `git -C snowmeet_ai_doc pull --ff-only`
+  - `--ff-only`：仅 fast-forward，本地有未推送提交或分叉时拒绝合并、不自作主张产 merge commit
+  - 失败（网络/冲突）不阻断 start-work，仅打印 warn
+- ✅ **Stop hook** → 检测 `snowmeet_ai_doc/sessions/*.md` 最近 3 分钟有改动时自动 `git add . + commit + push`
+  - 时机选择关键：`PostToolUse + Skill(end-work)` 在 skill 工具返回瞬间触发，**早于** end-work 实际写入 CLAUDE.md / sessions 文件，无东西可推；改用 Stop hook + 启发式（sessions/ 最近 mtime）匹配真实写入完成时机
+  - 幂等：working tree 干净时 push 输出 `Everything up-to-date` no-op；非 end-work 场景（普通对话停下、/clear、/compact）由于 sessions/ 没新改动也不会误触发
+  - 输出含改动列表（`?? = 新文件 / M = 修改 / D = 删除`），看得见 hook 实际做了什么
+
+📌 **关键发现 / 教训**：
+- **Skill 工具的 PostToolUse 时机不等于 skill 工作流完成**：Skill 工具返回 = skill 指令加载进 context，模型尚未执行其步骤。所以"在 skill X 之后做 Y"的 hook 不能简单 `PostToolUse + Skill(X)`，要么 Stop hook + 启发式，要么 Write/Edit 路径过滤
+- **`git add -A` ≈ `git add .` (from repo root)**：两者在 `git -C $REPO` 上下文下功能一致；新文件（untracked）通过 `git status --porcelain` 的 `??` 状态码呈现，二者都会暂存
+- **doc 仓库存在过未解决的 merge conflict**：本次 end-work 写文件时发现 CLAUDE.md 残留 `<<<<<<< HEAD` / `>>>>>>>` 标记被提交进了 d0d80e1 merge commit。修复方法：手动改掉再 commit。**未来 merge 后必须先 `git status` 查 unmerged，不能直接 commit**
