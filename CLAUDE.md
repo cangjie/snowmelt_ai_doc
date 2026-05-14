@@ -171,14 +171,20 @@ dotnet run
 
 ---
 
+<<<<<<< HEAD
 ## 当前状态（截至 2026-05-14 晚）
+=======
+## 当前状态（截至 2026-05-14 晚上）
+>>>>>>> 50ba79589195643a8395f648b59ac887ed9fe011
 
-**已可走通**：录入订单 → 选店 → 进入租赁开单 → 添加套餐（按品类筛选 + 万龙系店铺默认「立即租赁」+ 雪服/护具等非编码品类默认勾选「无编码」+ 创建时 startTime 默认当前时分）→ 购物车展示（rental 折叠态紧凑单行；展开态两层标题 + 跑马灯；rental 级 + rentItem 级双层完整性 chip；不完整时套餐名变红）→ 卡片展开编辑详情（套餐备注 + 起租日期 van-calendar 弹窗 + 今/明高亮快捷按钮 + 起租时间 picker；选租赁模式自动联动起租日期/时间：立即/先租后取=今天+当前时分、延时=明天+00:00；无编码/不需要 disabled 联动 + 不需要时整卡灰显）→ 装备编码录入（点编码区开搜索 modal，按品类模糊搜索租赁物，单选确认后回填 code/name/category_id/rent_product_id/class_name + 重复编码校验；扫码仍然可用）→ 押金/租金点击 tap 弹 `wx.showModal` 二次确认编辑（押金净额显示 = `realGuaranty − guaranty_discount`，下方购物车栏「押金 ¥净额 已减免 -¥xxx」）→ 套餐选模式时未自选 item 跟随 + 内部模式不一致显示 ⚠ → 左划删除 → 底部 4 个快捷入口横向紧凑按钮 + 单行结算条（件数徽章 + 押金 + 已减免 + 租金 + 去结算按钮，全部 rental 完整才允许点击）→ 点「去结算」先 await `saveRentReceptOrder` 落盘最新编辑、再调 `Order/PlaceRentOrder/{id}` 让服务端 `GenerateOrderCode` 生成 `WL_ZL_yyMMdd_xxxxx` 正式订单号 + `valid=1` + 写 Guaranty，返回的 order 回填 `this.data.order` → 跳 `/pages/payment/settle/index?orderId=...` → 结算页订单卡显示 `order.code || order.id` + 三选一支付方式（微信扫码 / 支付宝 mock / 其他确认收款）→ **顾客扫支付二维码进入 `pages/order/payment_entry`：轻量化纯 CSS 卡片版（订单信息 / 租赁内容折叠 / 金额 / 微信支付按钮），租赁明细只列 编码/名称/品类，押金 + 日租金同行各 300rpx 列宽** → 小程序客户端所有 `wx.request` 的 `POST` 请求在全局请求层统一对 payload 内 URL 编码中文执行 `urldecode`（含嵌套对象/数组）。每次结构变更/字段失焦自动 `Rent/SaveRentRecept` 同步后端，起租日期/时间通过 `start_date` (ISO datetime) 真持久化。
+**已可走通**：录入订单 → 选店 → 进入租赁开单 → 添加套餐（按品类筛选 + 万龙系店铺默认「立即租赁」+ 雪服/护具等非编码品类默认勾选「无编码」+ 创建时 startTime 默认当前时分）→ 购物车展示（rental 折叠态紧凑单行；展开态两层标题 + 跑马灯；rental 级 + rentItem 级双层完整性 chip；不完整时套餐名变红）→ 卡片展开编辑详情（套餐备注 + 起租日期 van-calendar 弹窗 + 今/明高亮快捷按钮 + 起租时间 picker；选租赁模式自动联动起租日期/时间：立即/先租后取=今天+当前时分、延时=明天+00:00；无编码/不需要 disabled 联动 + 不需要时整卡灰显）→ 装备编码录入（点编码区开搜索 modal，按品类模糊搜索租赁物，单选确认后回填 code/name/category_id/rent_product_id/class_name + 重复编码校验；扫码仍然可用）→ 押金/租金点击 tap 弹 `wx.showModal` 二次确认编辑（押金净额显示 = `realGuaranty − guaranty_discount`，下方购物车栏「押金 ¥净额 已减免 -¥xxx」）→ 套餐选模式时未自选 item 跟随 + 内部模式不一致显示 ⚠ → 左划删除 → 底部 4 个快捷入口横向紧凑按钮 + 单行结算条（件数徽章 + 押金 + 已减免 + 租金 + 去结算按钮，全部 rental 完整才允许点击）→ 点「去结算」先 await `saveRentReceptOrder` 落盘最新编辑、再调 `Order/PlaceRentOrder/{id}` 让服务端 `GenerateOrderCode` 生成 `WL_ZL_yyMMdd_xxxxx` 正式订单号 + `valid=1` + 写 Guaranty，返回的 order 回填 `this.data.order` → 跳 `/pages/payment/settle/index?orderId=...` → 结算页订单卡显示 `order.code || order.id` + 三选一支付方式（微信扫码 / 支付宝 mock / 其他确认收款）→ **顾客扫支付二维码进入 `pages/order/payment_entry`：轻量化纯 CSS 卡片版（订单信息 / 租赁内容折叠 / 金额 / 微信支付按钮），租赁明细只列 编码/名称/品类，押金 + 日租金同行各 300rpx 列宽** → 小程序客户端所有 `wx.request` 的 `POST` 请求在全局请求层统一对 payload 内 URL 编码中文执行 `urldecode`（含嵌套对象/数组）。每次结构变更/字段失焦自动 `Rent/SaveRentRecept` 同步后端，起租日期/时间通过 `start_date` (ISO datetime) 真持久化。→ **顾客扫码 payment_entry 落地后增加支付前身份验证**：onShow 调 `PaymentIdentity/CheckPayerIdentity` 拉 5 状态 → 未绑手机号弹一键授权 / 订单已匹配别人弹「正常支付（订单转归我）」「替人代付（订单仍归原会员）」二选一 modal / 订单未匹配会员则确认「订单将归我」→ `ConfirmPayIdentity` 立即落库 `Order.member_id` / `OrderPayment.member_id` / `is_proxy_pay` / `wechat_unverified`（支付宝支付一律置 `wechat_unverified=true`）→ status 转 `direct` 后才显示原微信支付按钮。**支付宝手机号解密目前是 stub**（待支付宝小程序对接）。
 
 **关键文件**
 - 页面：`pages/admin/reception/recept_entry`、`recept_new`、`recept_package`、`pages/order/payment_entry`（顾客扫码支付落地页）
 - 组件：`components/reception/rent_recept_form`（购物车 + 详情卡片 + 日历 modal + 编码搜索 modal）、`components/reception/search_product_fuzzy`（编码搜索弹窗，可复用）、`components/order-summary-card` + `components/order-payment`（结算页订单卡 + 二维码组件）
-- 数据接口（已对接）：`Order/GetShops`、`Rent/GetRentPackageList`、`Rent/GetRentPackage/{id}`、`Rent/GetRentPriceList`、`Rent/SaveRentRecept`、`Order/GetShopByName`、`Rent/GetRentProductFuzzy`、`Rent/GetTopRentCategories`、`Rent/GetSubRentCategories/{id}`、`Rent/GetRentCategory/{id}`、`Order/GetOrderFromPaymentByCustomer/{paymentId}`、`Order/WechatPayByOrderPayment/{paymentId}`
+- 数据接口（已对接）：`Order/GetShops`、`Rent/GetRentPackageList`、`Rent/GetRentPackage/{id}`、`Rent/GetRentPriceList`、`Rent/SaveRentRecept`、`Order/GetShopByName`、`Rent/GetRentProductFuzzy`、`Rent/GetTopRentCategories`、`Rent/GetSubRentCategories/{id}`、`Rent/GetRentCategory/{id}`、`Order/GetOrderFromPaymentByCustomer/{paymentId}`、`Order/WechatPayByOrderPayment/{paymentId}`、`PaymentIdentity/CheckPayerIdentity`、`PaymentIdentity/ConfirmPayIdentity`
+- 支付身份验证后端：`Controllers/Order/PaymentIdentityController.cs`（5 状态决策树 + submit_phone / choose / confirm_direct 三 action），模型 `Models/Order/Order.cs` (+`wechat_unverified`) / `Models/Order/OrderPayment.cs` (+`is_proxy_pay`) / `Models/Member/MemberSocialAccount.cs` (+`TYPE_WECHAT_MINI_OPENID` 等 4 个 type 常量)
+- 支付身份验证小程序：`components/pay-identity-confirm/`（4 文件，渲染 phone_required/direct_to_scanner/choose_identity/error 四态卡片）、`utils/data.js` 新增 `checkPayerIdentityPromise` + `confirmPayIdentityPromise`、`pages/order/payment_entry.{js,wxml,json}` 接入 identity 状态机
 
 **下一步要做的**
 - ✅ 第五步：支付结算页 mvp 完成（settle/index + order-summary-card + order-payment，微信支付走通、支付宝 mock、其他方式确认收款）
@@ -189,7 +195,11 @@ dotnet run
 - 第二步：去结算按钮入口（已在 `onCheckout` 接通 `Order/PlaceRentOrder` + navigateTo settle）
 - 养护 / 零售 业务的接待表单组件（目前仅租赁完成）
 - 旧版页面迁移：`recept_auth_list`、`recept_member_info`、`recept_list`、`rent_recepting_list`
-- 支付前身份验证（PRD 1.4.5 + 1.4.1）— plan 已审批待开工，见 `snowmeet_ai_doc/payment_identity_verification_plan.md`：后端加 `Order.pay_member_id` + `Order.is_proxy_pay` + 新建 `PaymentIdentityController`；小程序 `payment_entry` 改造 + 新建 `pay-identity-confirm` 组件
+- ✅ 支付前身份验证 A+B 切片完成：后端模型 / DB / `PaymentIdentityController` + 小程序 `pay-identity-confirm` 组件 + payment_entry 接入；swagger 烟测只读路径通过。**待真机端到端测试**：用其它账号扫顾客二维码触发 `choose_identity` 选「正常支付/替人代付」走完支付闭环 + DB 校验 `Order.member_id` / `OrderPayment.is_proxy_pay` / `wechat_unverified` 是否按预期写入
+- 支付宝真实手机号解密（接 `alipay.system.oauth.token` + `alipay.user.info.share`），当前是 stub（传 `phoneMock` 字段走通）
+- 决策时机改为"支付完成后"语义：把 `ConfirmPayIdentity` 的 Order.member_id 写入挪到 `OrderPaymentController` 的 wechat/alipay notify 回调里，本期是"立即生效"简化版
+- 未使用 fui-* 组件清理（本次删了 6 个：`fui-badge / fui-tabs / fui-toast / fui-top-popup / fui-utils / fui-wing-blank`，剩 17 个继续逐步弃用）
+- 页面可达性 review：`snowmeet_ai_doc/unreachable_pages.md` 列出 75 个从 index/mine BFS 不可达的页面（含 62 个完全孤立），需人工逐项区分 QR 扫码入口 vs 死代码后清理
 
 **已知遗留**
 - **macOS 上 pyodbc + msodbcsql18**：unixODBC 默认查 `/etc/odbcinst.ini` 但 brew 装的 msodbcsql18 注册在 `/opt/homebrew/etc/odbcinst.ini`。所有 pyodbc 脚本启动前要 `export ODBCSYSINI=/opt/homebrew/etc`（写到 shell rc 或脚本 wrapper 都行）。已在 `snowmeet_ai_doc/skills/export_rent_order/SKILL.md` 文档化
@@ -211,6 +221,11 @@ dotnet run
 - 结算页 `onPaid` 仅 `console.log`，未做跳转/刷新；父页面后续处理待定
 - 支付组件 WebSocket 仅在选中微信/支付宝并生成二维码后开启；切换支付方式时关闭旧 socket 再开新的，若用户在 prepay 调用中途切换会有短暂残留请求（无功能影响）
 - `pages/order/payment_entry` 目前仅对 `order.type=='租赁'` 做友好明细展示（编码/名称/品类 + 押金/日租金）；餐饮/零售/押金等其它类型走"最小版"（订单信息 + 金额 + 按钮），后续按业务需要扩展
+- **`Member.wechatMiniOpenId` 是后端计算属性**（getter 遍历 `memberSocialAccounts` 找 type=`wechat_mini_openid`），需要序列化时 MSA 集合被一并带回。顾客扫码 payment_entry 这种深链场景下 `app.globalData.member` 可能不齐全，导致前端取该字段为空。新接口（如 `PaymentIdentity/CheckPayerIdentity`）若需要扫码方 openid 都得做 sessionKey → `mini_session.member_id` 反查兜底
+- **`PaymentIdentityController` 用"立即生效"语义**：用户在 payment_entry 选完归我/代付后即写 `Order.member_id`，不等支付实际完成。如业务实测发现"用户中途放弃"导致归属错乱，需挪到 wepay/alipay notify 回调；本期为简化采用"用户确认即落地"
+- **支付宝 submit_phone stub**：`PaymentIdentityController._submitPhone` 当 `payerType=alipay` 时若传 `phoneMock` 字段直接用，否则返 `alipay_phone_pending`。真支付宝解密待支付宝小程序对接（`alipay.system.oauth.token` + `alipay.user.info.share`）
+- **`components/firstui/` 17 个组件仍在用**：含 `fui-config`（喂 `wx.$fui` 给 fui-button/icon/section/list-cell/white-space）+ `fui-css`（`app.wxss` 全局 `@import`）+ 其它 15 个有 wxml 引用。本次删的 6 个 (`fui-badge / fui-tabs / fui-toast / fui-top-popup / fui-utils / fui-wing-blank`) 是 0 引用残留
+- **页面可达性报告**：`snowmeet_ai_doc/unreachable_pages.md` — 117 个 page 中 62 个全项目零引用，但部分是 QR 扫码外部入口（如 `pages/order/payment_entry` 是顾客扫码落地页，必须留），删之前要逐项区分
 - payment_entry 折叠交互手写 `wx:if`，未引入 `van-collapse` 等组件以保持轻量；一个 Rental 内 rentItem 数量上限按 ~10 件设计
 - payment_entry 押金/日租金列宽固定 `300rpx`（5 位数字预算 `¥99999.00`），超出会被挤压；如业务出现万元以上押金需要回来调
 - payment_entry `pay()` 内成功回调里第二次拉单时把 `payment.id` 当成 paymentId 传，但拉回来的对象是新的 order（含 nonce 等微信字段已是 undefined），这一段是历史代码，本轮 UI 改造未触碰，留待后续清理
@@ -637,3 +652,89 @@ dotnet run
 📌 **关键发现 / 教训**：
 - **Excel General 格式 + 浮点零误差 = 科学计数法**：DB 端浮点累加产生的 `±1e-14` 级别数值，Excel 默认显示为 `-3.64E-14`。导出脚本写金额到 xlsx 时强制 `round(2)` + `number_format = '0.00'` 一并兜住，比依赖 General 格式可靠
 - **API 版与数据库直查版同区间订单数对齐**：两份各 2325 单（其中数据库直查版含 6 个重复订单号）。后续若要给 API 版加任何 DB 派生字段（订单结余 / 实付金额 / 招待标记 等），按订单号查表的模式可复用本脚本
+### 2026-05-14 — 支付前身份验证实施 + firstui 清理 + 页面可达性分析
+
+下午到晚上，从前一天的 plan 落到代码，端到端搭起 A 后端 + B 前端 mvp；并把 firstui 死代码清掉、做了全项目页面可达性 review。
+
+#### 一、A 后端切片（origin/ai 分支）
+
+- 新加字段：`Order.wechat_unverified (bool default false)` / `OrderPayment.is_proxy_pay (bool default false)`；DB 用户手工执行 `ALTER TABLE [order] ADD wechat_unverified BIT NOT NULL DEFAULT 0` + `ALTER TABLE [order_payment] ADD is_proxy_pay BIT NOT NULL DEFAULT 0`
+- `MemberSocialAccount.cs` 加 4 个 type 常量：`TYPE_WECHAT_MINI_OPENID / TYPE_WECHAT_UNIONID / TYPE_CELL / TYPE_ALIPAY_PAYERID`
+- 新建 [`Controllers/Order/PaymentIdentityController.cs`](../SnowmeetApi/Controllers/Order/PaymentIdentityController.cs)（~460 行）：
+  - `GET CheckPayerIdentity(paymentId, payerType, scannerId, sessionKey)` 只读 + 幂等，5 状态决策树（error / phone_required / direct / direct_to_scanner / choose_identity）
+  - `POST ConfirmPayIdentity` 3 action：`submit_phone`（微信 AES_decrypt encData / 支付宝 stub 接 phoneMock）/ `choose (self|proxy)` / `confirm_direct`
+  - 幂等锚 `op.member_id != null && status=='待支付'` → 直接返既有
+  - `payerType=alipay` 一律 `Order.wechat_unverified = true`
+- 用 `winget install Microsoft.DotNet.SDK.9` 装 .NET 9 SDK，`dotnet build` 0 错误（14 警告全部源自历史文件，新 controller 0 警告）
+- 本地 `dotnet run` swagger 烟测：GET 5 状态 × 2 payerType 路由 + POST `ConfirmPayIdentity` `[FromBody]` 绑定 + 幂等 short-circuit 全部正常；DB 连接通过 `config.sqlServer` 走生产读取，paymentId=42540 真实订单能拉到归属 `苍杰（个人）135****7897`
+
+#### 二、B 前端切片（snowmeet_wechat_mini ai 分支）
+
+- `utils/data.js` 加 `checkPayerIdentityPromise` + `confirmPayIdentityPromise`（沿用 `util.performWebRequest` 的 GET/POST 语义：data 为 undefined 走 GET，否则 POST）
+- 新建 `components/pay-identity-confirm/`（4 文件）：phone_required / direct_to_scanner / choose_identity / error 四态卡片；choose_identity 用 2 个按钮「正常支付（订单转归我）」+「替人代付」（代付二次 `wx.showModal` 确认）；视觉对齐 `pages/order/payment_entry` 的 `#2EA6D0` 主色 + 12rpx 卡片
+- `pages/order/payment_entry.{js,wxml,json}` 改造：
+  - `data` 新增 `paymentId / scannerId / identity` 三个字段
+  - `onShow` 在 `getOrderFromPaymentByCustomer` 后链调 `_refreshIdentity()`
+  - 子组件 `bind:refreshed` → `onIdentityRefreshed` 更新 identity state
+  - 支付按钮加 `identity.status === 'direct'` 守卫（wxml `wx:if` 直接隐藏，pay() 内再守一层防御性 toast）
+  - 注册 `pay-identity-confirm` 到 page json `usingComponents`
+
+#### 三、踩坑 + 修复（顾客真机 paymentId=42540）
+
+- **现象**：扫码进 payment_entry 后页面报「无法支付 / 无法获取微信账号，请重新登录后再试」
+- **根因**：我前端代码里 `app.globalData.member.wechatMiniOpenId` 取不到值的兜底分支被命中。深挖：`Member.wechatMiniOpenId` 是后端 Member 模型的**计算属性**（getter 遍历 `memberSocialAccounts` 集合），依赖序列化时 MSA 集合被一并带回。顾客扫码深链场景下 `app.globalData.member` 不一定齐全
+- **修复策略**：让后端兜底。`_resolveStatus` 加 `sessionKey` 参数 → `scannerId` 为空时按 `mini_session.member_id` 反向定位扫码方会员；3 个 action 处理器（`_submitPhone` / `_applyChoice` / `_applyConfirmDirect`）都串上 sessionKey；前端去掉 scannerId 空就报错的预检查，scannerId 拿不到时发空串给后端
+
+#### 四、清理 + 分析
+
+- **firstui 死代码清理**：删除 6 个未使用组件（`fui-badge / fui-tabs / fui-toast / fui-top-popup / fui-utils / fui-wing-blank`），净删 1435 行；同步从 `app.json` 移除 `fui-top-popup` 注册 + 从 `fui-config/index.js` 移除 `fuiWingBlank` 配置块。保留 `fui-config`（喂 `wx.$fui`）+ `fui-css`（全局 @import）+ 其它 15 个有 wxml 引用的活组件
+- **页面可达性分析**：写 Python 静态可达性脚本（[`unreachable_pages.md`](unreachable_pages.md)），从 `pages/index/index` + `pages/mine/mine` 出发递归 BFS（含组件 `usingComponents` 传导），117 页面归 3 类：
+  - A 完全可达：66
+  - B BFS 漏但全局有引用：13（多半新流程链路缺主入口）
+  - C 完全孤立：62（其中部分是 QR 扫码外部入口，要逐项区分）
+
+#### 五、关键产出
+
+| 项 | 状态 |
+|---|---|
+| 后端 controller + 模型 + DB schema | ✅ 编译 + swagger 烟测过 |
+| 前端组件 + payment_entry 改造 | ✅ 静态完整，运行时未真机验证 |
+| sessionKey 兜底修复 | ✅ 后端 build + 本地烟测过 |
+| 顾客扫码 → 选代付/归我 → 完成支付端到端 | ⏳ **待用户部署 ai 分支后端 + 重编小程序后真机测试** |
+| 支付宝真实手机号解密 | ⏳ 下次切片 |
+| 决策时机迁到 wepay/alipay notify 回调 | ⏳ 下次切片 |
+| firstui 死代码清理 6 个 | ✅ |
+| 页面可达性报告 | ✅ 已生成，待用户 review 决定删哪些 |
+
+#### 关键改动文件
+
+| 仓库 | 文件 | 操作 |
+|---|---|---|
+| SnowmeetApi (ai) | `Models/Order/Order.cs` | +1 行 `wechat_unverified` |
+| SnowmeetApi (ai) | `Models/Order/OrderPayment.cs` | +1 行 `is_proxy_pay` |
+| SnowmeetApi (ai) | `Models/Member/MemberSocialAccount.cs` | +4 个 type 常量 |
+| SnowmeetApi (ai) | `Controllers/Order/PaymentIdentityController.cs` | 新建 ~460 行（含 sessionKey 兜底） |
+| snowmeet_wechat_mini (ai) | `utils/data.js` | +2 个 Promise 包装 |
+| snowmeet_wechat_mini (ai) | `components/pay-identity-confirm/{json,js,wxml,wxss}` | 新建 4 文件 |
+| snowmeet_wechat_mini (ai) | `pages/order/payment_entry.{js,wxml,json}` | 接入 identity 状态机 |
+| snowmeet_wechat_mini (ai) | `app.json` | 移除 fui-top-popup 注册 |
+| snowmeet_wechat_mini (ai) | `components/firstui/{fui-badge,fui-tabs,fui-toast,fui-top-popup,fui-utils,fui-wing-blank}/` | 删除 |
+| snowmeet_wechat_mini (ai) | `components/firstui/fui-config/index.js` | 清理 fuiWingBlank 配置 |
+| snowmeet_ai_doc | `payment_identity_verification_plan.md` | 覆盖原 5-13 旧版（详细化 + 双通道 + wechat_unverified） |
+| snowmeet_ai_doc | `payment_identity_verification_requirements.md` | 新建：需求文档（业务视角）|
+| snowmeet_ai_doc | `unreachable_pages.md` | 新建：可达性分析报告 |
+
+#### 学到的小知识
+
+1. **Member 的计算属性序列化依赖关联集合被 Include**：`Member.wechatMiniOpenId` 看似普通 getter 但其实遍历 `memberSocialAccounts`，如果集合没 Include 进来就返 null。任何新接口要用 openid/unionid/cell 都先确认调用链 Include 链路完整；否则就走 sessionKey → mini_session 反查
+2. **System.Text.Json 默认序列化 read-only properties**：`Member.wechatMiniOpenId` 没 setter 但仍会出现在响应 JSON 里。问题是值依赖关联数据被加载（见上一条）
+3. **`OrderPayment.member_id` 是付款方的天然落点**：原 plan 想加 `Order.pay_member_id`，但 `OrderPayment` 已有 `member_id` 字段（建模时就为付款方留位），无需新增 — 加在 OrderPayment 上才是按付款粒度记代付的正确语义
+4. **wx.$fui 全局变量陷阱**：fui-button / fui-icon 等组件运行时读 `wx.$fui` 拿默认值。删 fui-config 会让这 5 个组件运行时拿不到默认 props，组件可能正常工作但视觉默认值丢失 — 不能轻删
+5. **小程序静态可达性 BFS 必须含组件传导**：直接扫页面引用会大量误报，因为很多导航发生在被引用的组件内部。BFS 时把页面的 `usingComponents` 当成边，递归到组件文件再扫 URL 引用
+6. **paymentId 是 OrderPayment.id 不是 Order.id**：顾客扫的二维码 URL 是 `?paymentId=xxx`，对应 `order_payment` 表主键；`PaymentIdentityController` 用 paymentId 索引（一单可分多笔付款，身份验证按付款粒度）
+
+#### 文档落地
+
+- 需求文档：[`payment_identity_verification_requirements.md`](payment_identity_verification_requirements.md)（业务视角，9 章节，PM 可读）
+- 实施方案：[`payment_identity_verification_plan.md`](payment_identity_verification_plan.md)（开发视角，覆盖前一天的 plan）
+- 可达性报告：[`unreachable_pages.md`](unreachable_pages.md)（待用户人工 review 决定删除范围）
