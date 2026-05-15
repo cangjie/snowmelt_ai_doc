@@ -751,3 +751,41 @@ dotnet run
 - **Skill 工具的 PostToolUse 时机不等于 skill 工作流完成**：Skill 工具返回 = skill 指令加载进 context，模型尚未执行其步骤。所以"在 skill X 之后做 Y"的 hook 不能简单 `PostToolUse + Skill(X)`，要么 Stop hook + 启发式，要么 Write/Edit 路径过滤
 - **`git add -A` ≈ `git add .` (from repo root)**：两者在 `git -C $REPO` 上下文下功能一致；新文件（untracked）通过 `git status --porcelain` 的 `??` 状态码呈现，二者都会暂存
 - **doc 仓库存在过未解决的 merge conflict**：本次 end-work 写文件时发现 CLAUDE.md 残留 `<<<<<<< HEAD` / `>>>>>>>` 标记被提交进了 d0d80e1 merge commit。修复方法：手动改掉再 commit。**未来 merge 后必须先 `git status` 查 unmerged，不能直接 commit**
+
+### 2026-05-15 — 新增财年版租赁导出 skill（单 sheet 宽表，财务视角）
+
+主要产出：`snowmeet_ai_doc/skills/export_rent_order_fiscal_year/{SKILL.md,export_rent_orders_fy.py}`，产物 `D:/snowmeet/wanlong_rent_orders_fy_2025-05-01_2026-04-30.xlsx`（98 列 × 2325 行）
+
+- 走 plan mode（plan 文件 `~/.claude/plans/vast-launching-clover.md`）。用户按 3 张截图逐列口述定义表头，最终澄清表结构是**5 段动态拼接**而非固定 62 列：固定前缀(17) + 动态支付区(maxPay×5) + 动态退款区(maxRefund×4) + 固定中段(14) + 固定后缀(13)
+- 复用对账版 `../export_rent_order/export_rent_orders.py` 的 `SHOP_PREFIX / REFUND_COND / DEFAULT_CONN / write_sheet`（sys.path import 单点真理，两 skill 必须 sibling）
+- 实现：预查询 maxPay/maxRefund → 主查询订单级（聚合/标量子查询保粒度）→ 支付/退款明细各一条 → Python 端按 order_id 拼动态列 + 财年体系列，headers 与 row 同处生成防错位
+- 端到端验证：2325 行段2/段3 逐笔金额加总 == 支付/退款合计（0 偏差，含 53 个多笔支付单）；测试 333 / 临时订单 135 与对账版同期记录吻合；快照优先 fallback member 验证通过
+
+📌 关键发现 / 教训：
+- **`order_payment` 支付成功时间列是 `paid_date`**（不是 create_date；待支付行 paid_date 为 null，create_date 有值）。对账版 PAYMENT_SQL 没取支付时间所以没踩到，本 skill 需要支付日期列时实探发现
+- **`payment_refund` 表无退款方式列**：退款方式只能经 `payment_refund.payment_id → order_payment.pay_method` 取原支付通道
+- **年度/财年报表必须按 `biz_date` 过滤，不是 `create_date`**：按 create_date 拉 2025-05~2026-04 会带出 biz_date 在 22-23/23-24/24-25 财年的老单尾巴（晚结算/退押金），财年列全乱。改 biz_date 过滤后默认区间订单财年恒 25-26。**代价**：与对账版（create_date 口径）不可 1:1 交叉对账，单列金额仍同源可按订单号比对
+- **滑雪租赁 biz_date 天然落在雪季**：万龙 25-26 全 2325 单 biz_date 都在营业区间 2025-10-21~2026-04-09 内，「营/非」全 `营业` 属正常（淡季无租赁单），非 bug
+- **`rentProperties.rentStatus` 纯 SQL 无法精确复现**：是 `Order.cs:1062` 依赖 realStartDate/totalSummary/guaranties.payStatus 计算属性的状态机；本 skill 用 SQL 化字段按 `Order.cs:1134-1172` 判定顺序做近似，SKILL.md 标注为「近似需验收」
+- **减免合计订单级 vs rental 级口径不同**：本 skill 是订单级三类(order_id / biz_type=租赁 biz_id / sub_biz_type∈日租金,租赁项 sub_biz_id) discount.id 去重 SUM；对账版 sheet2 是 rental 级 A∪B 严格归属。不可复用对账版 SQL 片段
+- **discount 表确有 `valid` 列**（int），三关联字段 order_id/biz_id/sub_biz_id 齐全
+
+补充（同日）：用户要求重导一份「order 不论 valid 都导」的版本，结果放 `snowmeet_ai_doc/`。
+- 加 `--include-invalid` 开关：用 `__VALID__` 运行期占位（ORDER_FILTER 里放 token，穿过 f-string，main 里 `.replace`）实现可逆放宽，**仅作用于 order 表**；rental/order_payment/discount/order_share/payment_share/member_social_account 的 valid 过滤全不动（用户只点名 order 表）
+- 万龙 25-26 带开关实测 98 列 × 3094 行；DB 同条件 `COUNT(*)`=3094 全匹配，`valid=1` 子集=2325（与初版一致）→ 证明超集正确无重无漏
+- 含作废单后：营/非 出现 218「非营业」（淡季废弃/测试单 biz_date 落在雪季外，反证营非逻辑正确）、测试 1102（大量未支付测试单 paid<5）、正/闭 关闭 849（作废单多未支付）
+- 产物：`snowmeet_ai_doc/wanlong_rent_orders_fy_2025-05-01_2026-04-30.xlsx`（786.8 KB）
+
+再补（同日）：用户要求「只万龙 + code 为空不导」。ORDER_FILTER **恒加 `o.code IS NOT NULL AND LTRIM(RTRIM(o.code))<>''`**（无 code = 未下单/废弃单，非真实业务记录，即便 --include-invalid 也排除，无需额外开关）。
+- 万龙 25-26 + --include-invalid 最终：98 列 × **2434 行**（3094 → 2434，剔 660 空 code 行）
+- 与 DB「万龙 biz_date区间 + type=租赁 + code非空」全集双向零差：DB 2434 行/2428 去重 ↔ xlsx 2434 行/2428 去重；差 6 = DB 内重复订单号（CLAUDE 早记录的已知现象，非空保留不剔）
+- 覆盖核查教训：脚本 `--shop` 必填→导出天然单店；该区间 type=租赁 code非空全 DB 共 2965 单分 5 店（万龙2434/南山250/崇礼227/渔阳31/怀北23），单店产物只含本店，问「是否全包含」要先分清全表 vs 单店口径
+
+再补（同日）：用户要求对重复订单号去重，规则「有成功支付记录 > valid=1 > id 最大」保留一条。
+- **重复 code 根因 = `OrderController.GenerateOrderCode` 序号竞态**：序号取「同前缀订单数+1」，并发/快速重复下单算到同一序号 → 同 code（万龙 25-26 有 6 个：5 个 0 付款空单双插 + `WT_ZL_251129_00016` 一条空单 + 一条真单 ¥1000/¥880）。属 DB 数据质量，根治需后端发号加唯一约束/原子自增
+- 实现：Python 端按 code 分组，`max(key=(有成功支付, valid==1, id))` 选留；`o.valid` 加进主查询做判据；maxPay/maxRefund 改为去重后保留集 Python 取 max（删原 PREQUERY_SQL 预查询，少一次往返且列数精确）
+- 实测 2434 → 2428 行（去 6 重复），关键校验 `WT_ZL_251129_00016` 正确留带钱条而非空单孪生
+
+再补（同日）：用户问「按天 code 尾号有无不连续」。分析去重后 2428 行：168 天每天都从 00001 起，仅 3 天有缺号共 6 个（251031 缺 7/11/14、251107 缺 11/13、251129 缺 15）。逐个查 DB 证实这 6 个尾号**从未生成**（非过滤/去重副作用）。
+- **缺号与重复号是同一发号竞态的镜像**：`GenerateOrderCode` 两单同时读到订单数 N、都写 N+1（→ 1 个重复号），订单数已 +2 但只用掉 N+1，下一单读 N+2 写 N+3 → N+2 永久跳过（1 个缺号）。故每次碰撞 = 1 重复 + 1 缺号，6↔6 账完全对上（251031:3 碰撞 3 缺 / 251107:2 / 251129:1）
+- 结论：导出完整无丢单，缺号是系统压根没发的序号；脚本无需改，根治在后端发号
