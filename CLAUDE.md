@@ -171,7 +171,7 @@ dotnet run
 
 ---
 
-## 当前状态（截至 2026-05-15 晚）
+## 当前状态（截至 2026-05-16）
 
 **已可走通**：录入订单 → 选店 → 进入租赁开单 → 添加套餐（按品类筛选 + 万龙系店铺默认「立即租赁」+ 雪服/护具等非编码品类默认勾选「无编码」+ 创建时 startTime 默认当前时分）→ 购物车展示（rental 折叠态紧凑单行；展开态两层标题 + 跑马灯；rental 级 + rentItem 级双层完整性 chip；不完整时套餐名变红）→ 卡片展开编辑详情（套餐备注 + 起租日期 van-calendar 弹窗 + 今/明高亮快捷按钮 + 起租时间 picker；选租赁模式自动联动起租日期/时间：立即/先租后取=今天+当前时分、延时=明天+00:00；无编码/不需要 disabled 联动 + 不需要时整卡灰显）→ 装备编码录入（点编码区开搜索 modal，按品类模糊搜索租赁物，单选确认后回填 code/name/category_id/rent_product_id/class_name + 重复编码校验；扫码仍然可用）→ 押金/租金点击 tap 弹 `wx.showModal` 二次确认编辑（押金净额显示 = `realGuaranty − guaranty_discount`，下方购物车栏「押金 ¥净额 已减免 -¥xxx」）→ 套餐选模式时未自选 item 跟随 + 内部模式不一致显示 ⚠ → 左划删除 → 底部 4 个快捷入口横向紧凑按钮 + 单行结算条（件数徽章 + 押金 + 已减免 + 租金 + 去结算按钮，全部 rental 完整才允许点击）→ 点「去结算」先 await `saveRentReceptOrder` 落盘最新编辑、再调 `Order/PlaceRentOrder/{id}` 让服务端 `GenerateOrderCode` 生成 `WL_ZL_yyMMdd_xxxxx` 正式订单号 + `valid=1` + 写 Guaranty，返回的 order 回填 `this.data.order` → 跳 `/pages/payment/settle/index?orderId=...` → 结算页订单卡显示 `order.code || order.id` + 三选一支付方式（微信扫码 / 支付宝 mock / 其他确认收款）→ **顾客扫支付二维码进入 `pages/order/payment_entry`：轻量化纯 CSS 卡片版（订单信息 / 租赁内容折叠 / 金额 / 微信支付按钮），租赁明细只列 编码/名称/品类，押金 + 日租金同行各 300rpx 列宽** → 小程序客户端所有 `wx.request` 的 `POST` 请求在全局请求层统一对 payload 内 URL 编码中文执行 `urldecode`（含嵌套对象/数组）。每次结构变更/字段失焦自动 `Rent/SaveRentRecept` 同步后端，起租日期/时间通过 `start_date` (ISO datetime) 真持久化。→ **顾客扫码 payment_entry 落地后增加支付前身份验证**：onShow 调 `PaymentIdentity/CheckPayerIdentity` 拉 5 状态 → 未绑手机号弹一键授权 / 订单已匹配别人弹「正常支付（订单转归我）」「替人代付（订单仍归原会员）」二选一 modal / 订单未匹配会员则确认「订单将归我」→ `ConfirmPayIdentity` 立即落库 `Order.member_id` / `OrderPayment.member_id` / `is_proxy_pay` / `wechat_unverified`（支付宝支付一律置 `wechat_unverified=true`）→ status 转 `direct` 后才显示原微信支付按钮。**支付宝手机号解密目前是 stub**（待支付宝小程序对接）。
 
@@ -815,3 +815,65 @@ dotnet run
 - **`punch_card` 表结构齐全但无 C# 模型 + `punch_card_used` 0 行**：DB schema 与代码层不同步的典型案例。改/对账次卡相关功能前必须先翻 controller 看实际走哪条路径（pay_option 字符串 vs punch_card 表），不要假定有结构化表就一定接通了
 - **xlsx 补列前先核对 sheet 名**：财年版 sheet 名是「年度租赁」而非「订单」（与对账版不同）。补列脚本第一次跑因死写 "订单" 报 KeyError，靠 `wb.sheetnames` 兜底打印才发现
 - **`pyodbc.connect` 参数化执行 SQL 时用 `?` 占位符防注入**：本次脚本里店铺/日期/N'支付成功' 都走参数化，含中文常量也无编码问题
+
+### 2026-05-16 — 财年导出 xlsx 增加「支付明细」+「支付流水」2 个 sheet
+
+主要文件：新建 `snowmeet_ai_doc/add_payment_detail_sheet_to_fy_xlsx.py`（~290 行），改 `snowmeet_ai_doc/wanlong_rent_orders_fy_2025-05-01_2026-04-30.xlsx`（追加 2 sheet）。**plan 文件**：`/Users/cangjie/.claude/plans/start-work-graceful-pine.md`（多轮 plan 演进按用户口径迭代列定义）。
+
+#### 一、「支付明细」sheet（22 列 × 2141 行，每笔成功支付一行）
+
+固定 10 列：
+- 订单号 / 支付订单号 (op.id) / 支付方式
+- **支付账户**：微信支付=JOIN `wepay_key.mch_id` 取真实商户号（万龙 3 个：`1604236346` 主力 1349 笔 / `1636313350` 旗舰租赁 332 笔 / `1636404775` 万龙零售 9 笔）；支付宝=空；其他=空
+- **顾客ID**：`COALESCE(NULLIF(op.open_id,''), op.ali_buyer_id)`（微信 openid / 支付宝 ali_buyer_id）
+- 支付日期 / 支付时间 (来自 paid_date，NULL 时 create_date 兜底) / 支付金额 / 退款金额 / 支付结余 (= 支付金额 − 退款金额)
+
+动态列：
+- maxRefund × 4：退款k 日期/时间/金额/方式（=原支付通道，因 payment_refund 表无 pay_method 列）
+- maxShare × 3：分账k 金额/成功/对象（`order_share_relation.name`），成功 4 态「是/否/作废/空」对应 `(success, valid)`：
+  - 是：success=1（成功入账）
+  - 否：success=0（接口驳回失败，全 12 笔都是支付宝）
+  - 作废：valid=0（请求生成后立即软删，submit_time 多为 NULL，未真实发出）
+  - 空：success=NULL valid=1（待回调）
+
+订单号集合来自主 sheet「年度租赁」的「订单号」列（不重做 DB dedup），与年度租赁 1:1 可交叉对账。
+
+#### 二、「支付流水」sheet（8 列 × 5783 行，3 类成功交易合并时间线）
+
+列：订单号 / 支付方式 / 支付账户 / 商户订单号 / 类型 / 交易金额 / 日期 / 时间
+
+3 类成功交易按日期+时间升序穿插：
+- 支付 2141 笔（op.status=支付成功 AND op.valid=1，金额正）
+- 退款 2088 笔（命中 REFUND_COND `state=1 OR refund_id<>''`，金额负）
+- 分账 1554 笔（success=1 AND valid=1，金额负）
+
+商户订单号字段：支付走 `op.out_trade_no`、退款走 `pr.out_refund_no`、分账走 `ps.out_trade_no`。out_trade_no 命名约定编码了交易类型：`{订单号}_ZF_NN`（支付）/`..._ZF_NN_TK_MM`（退款）/`..._ZF_NN_FZ_MM`（分账）。
+
+支付方式/支付账户：退款/分账继承自所属 payment。交易金额合计 ¥376,027.23（含符号 SUM = 实际净流入）。
+
+#### 三、对账校验全部通过
+
+| 项 | 支付流水 | 年度租赁 | 结果 |
+|---|---|---|---|
+| 支付总额 | 7,209,321.57 | 【支付k】sum 7,209,321.57 | ✓ |
+| 退款 abs | 6,604,799.33 | 【退款k】sum 6,604,799.33 | ✓ |
+| 分账 abs | 228,495.01 | 实分账金额 sum 228,495.01 | ✓ |
+
+#### 四、关键发现
+
+- **`payment_refund` 表无 `valid` 列**：所有过滤只能走 REFUND_COND；盲加 `pr.valid=1` 会 SQL 报错（参考 export_rent_order skill 的 PAYMENT_SQL 也不写）
+- **支付账户 ≠ 顾客 ID**：`open_id`/`ali_buyer_id` 是顾客侧 ID；"支付账户"语义应取 `JOIN wepay_key.mch_id` 真实商户号
+- **年度租赁的「实分账金额」严格等于 `payment_share` 中 success=1 AND valid=1 的 SUM**（228,495.01 完全等值）；整表 2428 行 `应分 − 实分 = 待分` 行级零差异
+- **9 单 ¥2,919.98 应分但 payment_share 不齐**：4 单完全无 ps 行 + 5 单 ps 行金额不齐；其中 `WT_ZL_251127_00009` 应分 ¥0.02 但生成 2 笔 ¥0.04 是**反向多生成**，用 abs(diff) > tol 才不漏
+- **WT_ZL_260223_00007 是典型「应分但作废」**：order_share os_id=1519 amt=650 dealed=1，但 payment_share ps_id=1413 valid=False（submit_time=NULL，订单 closed=1+hide=True 后系统主动放弃这笔分账）
+- **分账失败 12 笔全部支付宝**（微信 0 笔）：8 笔 ILLEGAL_SETTLE_STATE（退款 → 分账时序问题）/ 1 笔 BALANCE_NOT_ENOUGH / 1 笔 ALLOC_AMOUNT_VALIDATE_ERROR（分账 > 可分余额）/ 1 笔 DISCORDANT_REPEAT_REQUEST。真实业务损失 ~¥370（260325_00005 ¥260 + 251203_00003 ¥110）
+- **SQL Server `IN` CTE 双使用时参数翻倍**：CTE 里两处 IN 同批次 → 占位符重复一遍，每批 ≤1000 才不超 2100 上限
+- **`out_trade_no` 命名编码业务类型**：可凭字符串判断（`_ZF_` / `_TK_` / `_FZ_`）
+- **`should - got > tol` 单向比较会漏反向差额**：用 abs(diff) > tol 才完整
+
+#### 五、明日（2026-05-17）待验证
+
+- Excel 打开 xlsx 肉眼检查 3 sheet 列结构 + 样本数据
+- 9 单 ¥2,919.98 应分缺口订单是否需要人工补分账
+- 分账失败 12 笔归因是否准确（按错误码归类后告知运营）
+- 是否需要在「支付明细」加「应分账金额」列（合并 order_share + payment_share 维度）

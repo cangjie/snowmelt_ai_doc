@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Excel 临时锁文件（文件被打开时由 Excel/WPS 创建，关闭后消失）
+~$*.xlsx
+~$*.xls
+
+# macOS
+.DS_Store
