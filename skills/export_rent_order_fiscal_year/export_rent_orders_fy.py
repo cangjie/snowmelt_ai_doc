@@ -102,12 +102,13 @@ SELECT
     o.shop                                                  AS 门店,
     COALESCE(NULLIF(LTRIM(RTRIM(o.contact_name)), N''), m.real_name) AS 客户名称,
     COALESCE(NULLIF(LTRIM(RTRIM(o.contact_num)), N''), msa_cell.num) AS 电话,
-    msa_uid.num                                             AS [union id],
+    msa_oid.num                                             AS 顾客openid,
     big_pay.pay_method                                      AS 收款方式,
     CASE WHEN big_pay.pay_method = N'微信支付' THEN wk.mch_id ELSE NULL END AS 支付账号,
     CAST(o.biz_date AS DATE)                                AS 业务日期,
     CONVERT(VARCHAR(8), o.biz_date, 108)                    AS 业务时间,
     s.name                                                  AS 店员姓名,
+    ISNULL(NULLIF(LTRIM(RTRIM(staff_oid.openid)), N''), N'') AS 店员openid,
     CASE WHEN ISNULL(pay_agg.paid, 0) < 5
               OR (s.name IS NOT NULL AND s.name LIKE N'%苍%')
          THEN N'是' ELSE N'' END                            AS 测试,
@@ -180,9 +181,24 @@ OUTER APPLY (
 ) msa_cell
 OUTER APPLY (
     SELECT TOP 1 num FROM member_social_account
-    WHERE member_id = o.member_id AND type = N'wechat_unionid' AND valid = 1
+    WHERE member_id = o.member_id AND type = N'wechat_mini_openid' AND valid = 1
       AND LTRIM(RTRIM(num)) <> N'' ORDER BY id ASC
-) msa_uid
+) msa_oid
+OUTER APPLY (
+    SELECT TOP 1 saj.wechat_mini_openid AS openid
+    FROM staff_social_account ssa
+    JOIN social_account_for_job saj ON saj.id = ssa.social_account_id
+    -- 历史归集口径：不过滤 ssa.valid（离职店员旧账号 valid=0，历史经手订单仍要还原）。
+    -- 两级偏好：① 优先取日期窗口覆盖该 biz_date 的账号；② 若无任何覆盖窗口，
+    -- 回退到该店员「曾用过」的最近账号（start_date DESC）。仅排除 openid 空白记录。
+    WHERE ssa.staff_id = o.staff_id
+      AND LTRIM(RTRIM(saj.wechat_mini_openid)) <> N''
+    ORDER BY
+      CASE WHEN CAST(ssa.start_date AS DATE) <= CAST(o.biz_date AS DATE)
+                AND (ssa.end_date IS NULL OR CAST(ssa.end_date AS DATE) >= CAST(o.biz_date AS DATE))
+           THEN 0 ELSE 1 END,
+      ssa.start_date DESC, ssa.id DESC
+) staff_oid
 WHERE {ORDER_FILTER}
 ORDER BY o.biz_date ASC, o.create_date ASC, o.id ASC
 """
@@ -383,10 +399,10 @@ def main():
     # 段4（订单状态/最后退款 已在段1）
     headers += ['超时费合计', '赔偿合计', '减免合计', '隐藏订单',
                 '应分账金额', '实分账金额', '待分账金额', '业务', '门店',
-                '客户名称', '电话', 'union id', '收款方式', '支付账号']
+                '客户名称', '电话', '顾客openid', '收款方式', '支付账号']
     # 段5
     headers += ['订单号', '业务日期', '业务时间', '结算日期', '结算时间',
-                '支付总金额', '退款总金额', '订单结余', '店员姓名', '测试',
+                '支付总金额', '退款总金额', '订单结余', '店员姓名', '店员openid', '测试',
                 '临时订单', '客户名称', '正/闭']
 
     # 金额列号（1-based）用于 number_format
@@ -452,11 +468,11 @@ def main():
                 round(float(g('减免合计') or 0), 2), g('隐藏订单'),
                 round(float(g('应分账金额') or 0), 2), round(float(g('实分账金额') or 0), 2),
                 round(float(g('待分账金额') or 0), 2), '租赁', g('门店'),
-                g('客户名称'), g('电话'), g('union id'), g('收款方式'), g('支付账号')]
+                g('客户名称'), g('电话'), g('顾客openid'), g('收款方式'), g('支付账号')]
 
         seg5 = [g('订单号'), g('业务日期'), g('业务时间'), lr_d, lr_t,
                 round(float(paid), 2), round(float(refund), 2), round(float(balance), 2),
-                g('店员姓名'), test_flag, temp_order, g('客户名称'), zheng_bi]
+                g('店员姓名'), g('店员openid'), test_flag, temp_order, g('客户名称'), zheng_bi]
 
         full = seg1 + seg2 + seg3 + seg4 + seg5
         assert len(full) == len(headers), f'列错位 row={len(full)} header={len(headers)}'

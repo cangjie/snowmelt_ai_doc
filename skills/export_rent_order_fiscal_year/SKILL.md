@@ -77,7 +77,7 @@ python export_rent_orders_fy.py --shop 万龙体验中心 --include-invalid \
 
 ## 输出结构（单 sheet「年度租赁」，5 段）
 
-设固定列 44 个，导出区间内单订单最大成功支付笔数 = P、最大有效退款笔数 = R，则总列数 = 44 + P×5 + R×4。
+设固定列 45 个，导出区间内单订单最大成功支付笔数 = P、最大有效退款笔数 = R，则总列数 = 45 + P×5 + R×4。
 
 ### 段 1：固定前缀（17 列）
 
@@ -122,13 +122,13 @@ python export_rent_orders_fy.py --shop 万龙体验中心 --include-invalid \
 | 门店 | `order.shop` |
 | 客户名称 | `COALESCE(NULLIF(order.contact_name,''), member.real_name)`（快照优先 fallback 会员） |
 | 电话 | `COALESCE(NULLIF(order.contact_num,''), member_social_account[type=cell].num)` |
-| union id | `member_social_account[type=wechat_unionid].num`（快照无此字段，直接取会员） |
+| 顾客openid | `member_social_account[member_id=订单会员, type=wechat_mini_openid, valid=1].num`（小程序 openid，与「店员openid」同类型；原「union id」列已改名+换数据源） |
 | 收款方式 | **金额最大笔**成功支付的 `pay_method`（并列取 id 小者） |
 | 支付账号 | 同上那笔的账号（微信→`wepay_key.mch_id`，否则空） |
 
-### 段 5：固定后缀（13 列，≈ 对账版 sheet1「订单汇总」基线）
+### 段 5：固定后缀（14 列，≈ 对账版 sheet1「订单汇总」基线）
 
-订单号 / 业务日期 / 业务时间 / 结算日期 / 结算时间 / 支付总金额 / 退款总金额 / 订单结余 / 店员姓名 / 测试 / 临时订单 / 客户名称 / 正/闭
+订单号 / 业务日期 / 业务时间 / 结算日期 / 结算时间 / 支付总金额 / 退款总金额 / 订单结余 / 店员姓名 / 店员openid / 测试 / 临时订单 / 客户名称 / 正/闭
 
 | 列 | 口径 |
 |---|---|
@@ -136,7 +136,8 @@ python export_rent_orders_fy.py --shop 万龙体验中心 --include-invalid \
 | 业务日期/时间 | `order.biz_date` 拆分 |
 | 结算日期/时间 | `MAX(payment_refund.create_date)`（= 段1 最后退款） |
 | 支付总金额/退款总金额/订单结余 | 同段1（重复列，原样保留） |
-| 店员姓名 | `staff.name` |
+| 店员姓名 | `staff.name`（`order.staff_id → staff`） |
+| 店员openid | 该店员的微信小程序 openid：`order.staff_id → staff_social_account → social_account_for_job.wechat_mini_openid`。**历史归集口径，不过滤 `ssa.valid`**（离职店员旧账号 `valid=0`，历史经手订单仍要还原）。**两级偏好**：① 优先取日期窗口覆盖订单 `biz_date` 的账号；② 若无覆盖窗口，回退到该店员「曾用过」的最近账号（`start_date DESC`）。仅当该店员从无任何带 openid 的 staff_social_account 记录时才留空（实测万龙财年 0 留空） |
 | 测试 | 支付合计 < 5 OR 店员姓名含「苍」→ `是` |
 | 临时订单 | 非测试 + 订单结余>0 + 该订单无有效 rental → `是` |
 | 客户名称 | 同段4（重复列，原样保留） |

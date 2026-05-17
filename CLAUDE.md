@@ -171,7 +171,7 @@ dotnet run
 
 ---
 
-## 当前状态（截至 2026-05-16）
+## 当前状态（截至 2026-05-17）
 
 **已可走通**：录入订单 → 选店 → 进入租赁开单 → 添加套餐（按品类筛选 + 万龙系店铺默认「立即租赁」+ 雪服/护具等非编码品类默认勾选「无编码」+ 创建时 startTime 默认当前时分）→ 购物车展示（rental 折叠态紧凑单行；展开态两层标题 + 跑马灯；rental 级 + rentItem 级双层完整性 chip；不完整时套餐名变红）→ 卡片展开编辑详情（套餐备注 + 起租日期 van-calendar 弹窗 + 今/明高亮快捷按钮 + 起租时间 picker；选租赁模式自动联动起租日期/时间：立即/先租后取=今天+当前时分、延时=明天+00:00；无编码/不需要 disabled 联动 + 不需要时整卡灰显）→ 装备编码录入（点编码区开搜索 modal，按品类模糊搜索租赁物，单选确认后回填 code/name/category_id/rent_product_id/class_name + 重复编码校验；扫码仍然可用）→ 押金/租金点击 tap 弹 `wx.showModal` 二次确认编辑（押金净额显示 = `realGuaranty − guaranty_discount`，下方购物车栏「押金 ¥净额 已减免 -¥xxx」）→ 套餐选模式时未自选 item 跟随 + 内部模式不一致显示 ⚠ → 左划删除 → 底部 4 个快捷入口横向紧凑按钮 + 单行结算条（件数徽章 + 押金 + 已减免 + 租金 + 去结算按钮，全部 rental 完整才允许点击）→ 点「去结算」先 await `saveRentReceptOrder` 落盘最新编辑、再调 `Order/PlaceRentOrder/{id}` 让服务端 `GenerateOrderCode` 生成 `WL_ZL_yyMMdd_xxxxx` 正式订单号 + `valid=1` + 写 Guaranty，返回的 order 回填 `this.data.order` → 跳 `/pages/payment/settle/index?orderId=...` → 结算页订单卡显示 `order.code || order.id` + 三选一支付方式（微信扫码 / 支付宝 mock / 其他确认收款）→ **顾客扫支付二维码进入 `pages/order/payment_entry`：轻量化纯 CSS 卡片版（订单信息 / 租赁内容折叠 / 金额 / 微信支付按钮），租赁明细只列 编码/名称/品类，押金 + 日租金同行各 300rpx 列宽** → 小程序客户端所有 `wx.request` 的 `POST` 请求在全局请求层统一对 payload 内 URL 编码中文执行 `urldecode`（含嵌套对象/数组）。每次结构变更/字段失焦自动 `Rent/SaveRentRecept` 同步后端，起租日期/时间通过 `start_date` (ISO datetime) 真持久化。→ **顾客扫码 payment_entry 落地后增加支付前身份验证**：onShow 调 `PaymentIdentity/CheckPayerIdentity` 拉 5 状态 → 未绑手机号弹一键授权 / 订单已匹配别人弹「正常支付（订单转归我）」「替人代付（订单仍归原会员）」二选一 modal / 订单未匹配会员则确认「订单将归我」→ `ConfirmPayIdentity` 立即落库 `Order.member_id` / `OrderPayment.member_id` / `is_proxy_pay` / `wechat_unverified`（支付宝支付一律置 `wechat_unverified=true`）→ status 转 `direct` 后才显示原微信支付按钮。**支付宝手机号解密目前是 stub**（待支付宝小程序对接）。
 
@@ -199,6 +199,7 @@ dotnet run
 
 **已知遗留**
 - **macOS 上 pyodbc + msodbcsql18**：unixODBC 默认查 `/etc/odbcinst.ini` 但 brew 装的 msodbcsql18 注册在 `/opt/homebrew/etc/odbcinst.ini`。所有 pyodbc 脚本启动前要 `export ODBCSYSINI=/opt/homebrew/etc`（写到 shell rc 或脚本 wrapper 都行）。已在 `snowmeet_ai_doc/skills/export_rent_order/SKILL.md` 文档化
+- **本机(Intel Mac) ODBC 配置异于上条**：上条 `/opt/homebrew/etc` + Driver 18 是给 Apple Silicon 同步机的；Intel Mac（brew 在 `/usr/local`）需 `export ODBCSYSINI=/usr/local/Cellar/unixodbc/2.3.4/etc` + 用 `--conn` 覆盖成 `DRIVER={ODBC Driver 13 for SQL Server}`（脚本 DEFAULT_CONN 写死 Driver 18，本机只装了 13）
 - **数据库里 rental_detail.charge_type 只有'租金'、'超时费'、'赔偿金'三种值**：用户口语的'损坏赔偿'实际是'赔偿金'。新查询写 `IN ('赔偿金','损坏赔偿')` 兼容
 - **discount 归属计算用"detail 级 + 非 detail rental 级"严格归一**：详见 `snowmeet_ai_doc/skills/export_rent_order/SKILL.md` 减免金额定义。直接 `order_id` 匹配会让多 rental 订单的全单 discount 在每条 rental 上重复计入
 - **租赁数据导出脚本现状**：`snowmeet_ai_doc/export_wanlong_rent_orders.py` 是旧的万龙单店脚本（保留作历史）；`snowmeet_ai_doc/skills/export_rent_order/export_rent_orders.py` 是通用版本（任何店铺）。维护时改通用版，旧脚本不再演进
@@ -877,3 +878,30 @@ dotnet run
 - 9 单 ¥2,919.98 应分缺口订单是否需要人工补分账
 - 分账失败 12 笔归因是否准确（按错误码归类后告知运营）
 - 是否需要在「支付明细」加「应分账金额」列（合并 order_share + payment_share 维度）
+
+### 2026-05-17 — 财年 xlsx 加「店员openid」+「union id」改「顾客openid」+ 支付对账验证
+
+主要文件：改 `snowmeet_ai_doc/skills/export_rent_order_fiscal_year/export_rent_orders_fy.py` + 同目录 `SKILL.md`；新建只读 `snowmeet_ai_doc/verify_payment_reconcile.py`；重生成 `wanlong_rent_orders_fy_2025-05-01_2026-04-30.xlsx`。**plan**：`/Users/cangjie/.claude/plans/sheet-openid-adaptive-teacup.md`。
+
+#### 一、支付对账验证（接 5-16 待办）
+- `verify_payment_reconcile.py` 只读两 sheet 按订单号汇总，`最终金额 = 支付 − 退款 − 分账`
+- 「仅成功分账」口径 2079 单逐单零差异 ✓；「全部分账」差 ¥14,045.38 = 64 单失败/作废分账（支付流水只收 success=1，设计预期非 bug）
+
+#### 二、「年度租赁」新增「店员openid」列（紧邻「店员姓名」右）
+- 路径 `order.staff_id → staff_social_account → social_account_for_job.wechat_mini_openid`
+- 口径 3 轮收敛：①窗口+`ssa.valid=1`（13 空）→ ②**去 valid**（4 空，离职店员旧账号 valid=0 仍要还原历史归集）→ ③**两级偏好**（窗口覆盖 biz_date 优先，否则回退该店员 start_date DESC 最近曾用账号）→ **0 空 / 2319 行全覆盖**
+- 实现：仿 `msa_cell`/`big_pay` 的 `OUTER APPLY ... staff_oid`，`ORDER BY CASE WHEN 窗口命中 THEN 0 ELSE 1 END, start_date DESC, id DESC`，TOP 1 防行数翻倍
+
+#### 三、「union id」→「顾客openid」（列名 + 数据源都换）
+- 原 `member_social_account[type=wechat_unionid]` → `type=wechat_mini_openid`（小程序 openid，与店员openid 同类型），alias `msa_uid → msa_oid`
+- 非空 2274/2319（98.1%）；其余空 = 该会员无 wechat_mini_openid 记录（纯线下/未授权小程序顾客）
+
+#### 四、关键发现
+- **本机 Intel Mac ODBC**：CLAUDE.md「已知遗留」那条 `/opt/homebrew/etc`+Driver18 是 Apple Silicon 同步机；本机需 `ODBCSYSINI=/usr/local/Cellar/unixodbc/2.3.4/etc` + `--conn` 覆盖 Driver 13
+- **财年脚本整本重建 xlsx**：每次重跑后必须紧接着重跑 `add_payment_detail_sheet_to_fy_xlsx.py`，否则「支付明细/支付流水」两 sheet 丢失（曾因 cd 到 skill 子目录导致第二脚本路径失败、漏掉两 sheet）
+- **staff_social_account.valid 语义**：离职/换号后旧记录置 valid=0；历史报表归集**不能过滤 valid**，否则离职店员经手的历史订单 openid 丢失
+- 行数 2319（非 5-16 记的 2428）：当前生产数据已变（脚本走自身规范过滤口径，正常）
+
+#### 五、待验证/可选
+- 那 ~45 个无 顾客openid 的订单是否需关注（多为未授权小程序顾客，预期空）
+- 是否需把「店员openid」两级偏好回退口径同样应用到其它导出脚本
