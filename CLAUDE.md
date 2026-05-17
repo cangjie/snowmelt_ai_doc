@@ -234,6 +234,7 @@ dotnet run
 - **未结算订单虚账**：`rental.settled=0` 的 rental 会持续按天累积 `rental_detail` 应收记录（如雪季初一直没关单的，累积到 189 天 ¥9 万）。做收入报表必须过滤已结算/已关闭，否则虚增
 - **`api/Rent/GetConfirmedRentOrder` (RentController.cs:5544) 的"确认订单"5 条规则**：paidAmount > 0 AND closed=1 AND close_date != null AND !hide AND 不含非微信非支付宝支付（现金/储值/转账等会被排除）；做对账报表时这是参考过滤口径
 - **`punch_card` / `punch_card_used` 表存在但 EF 未接**：DB 有 `punch_card`(36 行, 字段 id/biz_type/card_name/member_id/mi7_code/total/punches) + `punch_card_used`(**0 行**, 字段 id/card_id/order_id/biz_type/biz_id/payment_id/punch_count/valid)。`SnowmeetApi/Models/` 下**无** `PunchCard` / `PunchCardUsed` 模型（grep 0 命中）。当前业务核销「次卡支付」仍走 `order_online.pay_memo='次卡支付'`（6 单）/ `[order].pay_option='次卡支付'` 字符串标记的老路径，新结构化的 punch_card_used 明细表尚无写入代码
+- **同步以 skill 步骤为准，别依赖本机 hook**：start-work 已把 `git -C snowmeet_ai_doc pull --ff-only` 内置为 `SKILL.md` 第 1 步（入库、跨机生效）。`.claude/settings.local.json` 的 PreToolUse(pull) / Stop(push) hook 是 gitignored / 机器本地；本会话实测 PreToolUse **未触发**（疑非标准 `if` 键），仅作冗余。Stop hook 已收紧为仅 `git add -- sessions CLAUDE.md`（不再 `git add .` 吞 WIP），非归档改动不会被自动 push，留待手动
 
 ---
 
@@ -925,3 +926,25 @@ dotnet run
 #### 三、待验证/可选
 - 其余店铺（渔阳/怀北/万龙服务中心）按需同法导出
 - 是否把无分账店铺「年度租赁」的 3 个空分账固定列也去掉（需脚本支持按店自适应；目前保留=同款规则）
+
+### 2026-05-17（续2） — start-work 内置 git pull + Stop hook 收紧
+
+主要文件：改 `snowmeet_ai_doc/.claude/skills/start-work/SKILL.md`（入库，已随 `e899295` 推送）+ 仓库根 `.claude/settings.local.json` 的 Stop hook（gitignored/机器本地，不入库）。plan：`/Users/cangjie/.claude/plans/start-work-synthetic-comet.md`。
+
+#### 一、根因：start-work 加载到过期上下文
+- 会话起始本地 HEAD=`ffbb27e`，缓存 origin/main=`ffbb27e`，`git ls-remote` 查真实远端=`dbaa546` → 连 fetch 都没发生，start-work 读了旧 CLAUDE.md
+- 同步本应由 `.claude/settings.local.json` 的 `PreToolUse/Skill(start-work)` hook（`git pull --ff-only`）做；本会话该 hook **未执行**（最可疑：用了非标准 `"if"` 键 + `|| echo warn` 吞错不阻断）
+
+#### 二、修正 1：git pull 写进 SKILL.md 第 1 步（用户指定）
+- `## Process` 新增第 1 步 `git -C snowmeet_ai_doc pull --ff-only`，原 Read/Present/Format 顺延为 2/3/4；失败显式告警「⚠️ 同步失败」不静默
+- 理由：skill 入库、跨机生效；不再依赖 gitignored/机器本地、且实测不可靠的 hook
+
+#### 三、修正 2：Stop hook 收紧（用户要求）
+- 旧 Stop hook：sessions/*.md 近 3 分钟有改动就 `git add .` 全量 commit+push → 把本会话一个有意的 SKILL.md 改动用 `auto: end-work session archive` 自动推到了共享远端（即 `e899295`）
+- 收紧为：`git add -- sessions CLAUDE.md`（仅归档产物）；仅这两路径有改动才 commit；**仅 commit 成功后**才 push；其余改动 `git status --porcelain` 列出提示「留待手动处理」
+- 隔离临时仓库实跑两场景通过：A 三类改动同改→只提交 sessions+CLAUDE.md、无关文件留工作区；B 仅无关文件改→无 commit、origin 未 push
+
+#### 四、关键发现 / 教训
+- `git status` 的「up to date with origin/main」比的是**本地缓存的 origin/main**，未 fetch 时谎报；真实远端用 `git ls-remote origin refs/heads/main`（只读）
+- 本会话 SKILL.md 改动「看不到」是因 Stop hook 已 commit+push（HEAD=`e899295` 已含），非未改；提交链线性无分叉，`dbaa546` 那批未同步工作也已并入
+- `.claude/settings.local.json` gitignored/机器本地/不跨机；start-work 的 pull、end-work 的 push 可靠性必须落在「入库 skill 步骤 + 跨会话记忆」，hook 仅本机冗余
