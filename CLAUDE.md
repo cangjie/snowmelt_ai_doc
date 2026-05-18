@@ -997,3 +997,63 @@ dotnet run
 - 养护单 `order.type=N'养护'` biz_code YH，万龙养护 `shop='万龙服务中心'`（ReceptController 自动改写）；行项目 `care`(一单可多块板)+`care_task`(工序)，无 charge_type/押金；导出走 `skills/export_care_order_fiscal_year/`
 - 零售单 `order.type=N'零售'` biz_code LS；行项目 `retail`(一单可多件)，金额 `deal_price`(实收)，`sale_price` 恒 NULL；无 charge_type/成本/数量/工序状态；导出走 `skills/export_retail_order_fiscal_year/`
 - 仍开放：渔阳/怀北 养护·零售按需同法（一行命令）；养护「服务项目」列为推断口径（need_* 并集，未含 free_wax/未对齐 care_task 工序名）；零售「订单状态」为支付派生简化口径
+
+### 2026-05-18（续2） — 雪票导出 Skill + 零售报表增强
+
+会话起始 start-work。核心：创建雪票订单财年导出 skill（仿零售版改用 ski_pass 表），导出崇礼旗舰店报表，三表对账验证；为四个零售报表增加「七色米订单号」列。
+
+#### 一、创建雪票订单财年导出 skill
+
+**需求**：用户要求"以同样的方式导出崇礼旗舰店的雪票订单"。现状仅有租赁/养护/零售三个导出 skill，缺雪票版本。
+
+**数据模型梳理**
+- `ski_pass` 独立业务表（与 order 一对多），行项目代表一张雪票
+- 关键字段：`id`, `order_id`, `deal_price`(成交价), `count`(数量), `resort`(南山/万龙), `ticket_price`(票面价), `valid`, `create_date`
+- 支付/退款共用表（`order_payment`, `payment_refund`）
+- 无 charge_type/成本/工序状态，无 order_type 招待标记
+
+**实施**
+- 新建 `skills/export_ski_pass_order_fiscal_year/` 目录（sibling 复用 export_rent_order 单点真理）
+- 脚本 `export_ski_pass_orders_fy.py`（469 行，改用 ski_pass 表主查询；段4 新增雪票张数/成交价/万龙/南山分布，去掉招待件数）
+- 文档 `SKILL.md`（ski_pass vs 零售数据模型对比、输出结构、口径说明）
+- 首次导出：崇礼旗舰店 25-26 财年
+  - 命令：`python3 export_ski_pass_orders_fy.py --shop 崇礼旗舰店 --out chongli_ski_pass_orders_fy_2025-05-01_2026-04-30.xlsx --conn "DRIVER={ODBC Driver 13...}"`
+  - 环境：Intel Mac 需 `export ODBCSYSINI=/usr/local/Cellar/unixodbc/2.3.4/etc`（Driver 13）
+  - 结果：709 订单，52 支付笔，67 退款笔，¥250,709.00 结余；56 列（动态支付 1×5 + 动态退款 1×4 + 固定中段 16 + 固定后缀 14）
+
+**三表对账（完全跨脚本复用 `add_payment_detail_sheet_to_fy_xlsx.py` + `verify_payment_reconcile.py`，无修改）**
+- 主表「年度雪票」709 订单 vs 支付明细 552 订单：完全一致 ✓
+  - 订单结余都是 ¥250,709.00（支付明细 552 + 主表未支付 157）
+- 支付明细 vs 支付流水：191 单各差 ¥1
+  - 原因：分账口径（全部 vs 仅成功）；差异预期，用「仅成功分账」口径时三表一致
+
+#### 二、零售报表增加「七色米订单号」列
+
+**需求**：为四个零售财年报表各添加一列"七色米订单号"，关联 retail.mi7_code
+
+**实施**
+- SQL：`SELECT o.code, STUFF((...FOR XML PATH('')), ...) AS mi7_codes` 聚合 mi7_code（多码用分号分隔，去重）
+- Python 脚本遍历四个零售报表（wanlong/wanlong_service/chongli/nanshan）
+  1. 读订单号（第 43 列）
+  2. 查库获对应 mi7_code
+  3. 插新列（第 57 列）
+- 结果
+  | 文件 | 总行 | 有 mi7_code 行 |
+  |------|------|---------------|
+  | 万龙体验中心 | 186 | 138 |
+  | 万龙服务中心 | 31 | 23 |
+  | 崇礼旗舰店 | 261 | 169 |
+  | 南山 | 497 | 471 |
+  | **合计** | **975** | **801** |
+  - 数据库全库 3122 个订单有 mi7_code（七色米覆盖）；四个报表覆盖 801 个（26%，跨财年·多店）
+
+**关键发现 / 教训**
+- **SQL Server 2012 不支持 STRING_AGG**：改用 `STUFF(...FOR XML PATH(''))`（driver 13 兼容）
+- **对账口径选择**：「全部分账」vs「成功分账」会导支付流水差异；财务报表应统一「成功」口径
+- **雪票数据独立**：ski_pass 是否业务表，非 rental/retail 的"含义差异"，独立模型+独立导出 skill
+- **mi7_code 覆盖率低**：仅 26% 订单有关联，因七色米系统非全店覆盖
+
+**状态**
+- ✅ 雪票导出 skill 创建 + 首次导出 + 三表对账
+- ✅ 零售报表四份各添加「七色米订单号」列
+- 仍开放：渔阳/怀北 雪票导出（可一行命令复用）；mi7_code 覆盖率是否需要问业务
