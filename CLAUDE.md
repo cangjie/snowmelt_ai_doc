@@ -237,7 +237,7 @@ dotnet run
 - **同步以 skill 步骤为准，别依赖本机 hook**：start-work 已把 `git -C snowmeet_ai_doc pull --ff-only` 内置为 `SKILL.md` 第 1 步（入库、跨机生效）。`.claude/settings.local.json` 的 PreToolUse(pull) / Stop(push) hook 是 gitignored / 机器本地；本会话实测 PreToolUse **未触发**（疑非标准 `if` 键），仅作冗余。Stop hook 已收紧为仅 `git add -- sessions CLAUDE.md`（不再 `git add .` 吞 WIP），非归档改动不会被自动 push，留待手动
 - **`all_销售单列表.xls` 是七色米全店全量导出**（崇礼/万龙/南山/总部/离职等所有门店，910 单据/1268 明细行）。`万龙_销售单列表.xls` 也是多店全量（含 592 南山店行），行级 100% ⊆ all；`南山_销售单列表.xls` 与 all 同单据同店但 **595 行全不相等，唯一差异列 `成本额`**（南山那份是 `'-'` 占位，all 是真实成本），其余 33 列 + 合并用全部 10 个明细字段（商品编号/名称/分类/规格/属性/数量/单价/折扣/折后单价/总额）完全一致 → **三个 `add_*_retail_detail_merged` 脚本可统一用 `all_销售单列表.xls` 作单一明细源，合并结果不变**（成本额不在合并 10 字段内）。原 `销售单列表_c393a061-...xls` 已改名 `南山_销售单列表.xls`
 - **本机(Intel Mac) python3 默认无 `xlrd`**（读 `.xls` 必需）：已 `pip3 install xlrd`(2.0.2)。新机器跑 `add_*_retail_detail_merged_xlsx.py` / `export_all_orphan_records.py` 前先装 xlrd + openpyxl
-- **零售明细合并孤儿口径**：反向核对 = `all 单据编号集合 − 四店年度零售明细已消费的七色米订单号集合`，再按 `所属门店` + 是否出现在某报表 `年度零售`(含关闭/剔除单) 归因。「总部/崇礼万龙店无财年零售报表」「报表内但单关闭/剔除被删」属预期；「崇礼旗舰/南山·报表无此七色米号」才是待查（七色米有销售但 DB 零售单未带匹配号或超财年口径）
+- **零售明细合并孤儿口径**：反向核对 = `all 单据编号集合 − 五店年度零售明细已消费的七色米订单号集合`（2026-05-19续2 起含总部），再按 `所属门店` + 是否出现在某报表 `年度零售`(含关闭/剔除单) 归因。「崇礼万龙店无财年零售报表」「报表内但单关闭/剔除被删」属预期；「崇礼旗舰/南山/**总部**·报表无此七色米号」才是待查（七色米有销售但 DB 零售单未带匹配号或超财年口径）。**总部已于 2026-05-19续2 出财年零售报表 + 年度零售明细**，不再属「无报表」预期，其未匹配单转待查
 
 ---
 
@@ -1120,3 +1120,37 @@ dotnet run
 - **严格 sheet 等价比对**必须带 fill 的 pattern/theme/indexed/tint + 字体色 + 数字格式 + 值；只比 `fill.start_color.rgb` 会漏 theme/indexed 色，且只扫单列会漏判（南山案例先只比 A 列得 0 差异，全表才确认真 0）。
 - Intel Mac python3 默认无 `xlrd`，读 `.xls` 前 `pip3 install xlrd`。
 - 用户口径沿用并固化：微额 ¥0.0x + ¥0 无号单当测试单整单剔除，实额缺号保留标红；剔除范围用单点 `AskUserQuestion` 确认，不连发多选。
+
+### 2026-05-19（续2）— 总部零售财年导出 + 孤儿核对纳入总部（五店）
+
+会话起始 start-work。两个产出：① 仿四店导总部财年零售报表；② 总部既出报表后，把反向核对孤儿从「四店」升级到「五店」，重算 `all_销售单列表_孤儿记录.xlsx`。详见 [`sessions/2026-05-19_headquarters_retail_export_and_orphan_update.md`](sessions/2026-05-19_headquarters_retail_export_and_orphan_update.md)。
+
+#### 一、总部财年零售报表
+
+- 店铺 DB 值确认为 `总部`（不在 `SHOP_PREFIX`，显式用英文前缀 `headquarters_` 保持 sibling 命名一致）
+- 两脚本工作流（`export_retail_orders_fy.py --shop 总部` → `add_payment_detail_sheet_to_fy_xlsx.py --main-sheet 年度零售` → `verify_payment_reconcile.py`）
+- 产物 [`headquarters_retail_orders_fy_2025-05-01_2026-04-30.xlsx`](headquarters_retail_orders_fy_2025-05-01_2026-04-30.xlsx)：51 列×47 行（maxPay=1/maxRefund=0/0 重复/0 退款/0 分账）；biz_date 实际落 2025-12-10~2026-03-21
+- **三表对账零差异**：Σ订单结余 = Σ销售额合计 = DB SUM(deal_price) = DB SUM(支付成功) = **¥114,924.00**（逐订单 0 单不一致）。总部无退款无折让全额支付故销售额=结余
+
+#### 二、孤儿核对升级到五店
+
+- 给总部 `年度零售` 补 `七色米订单号` 列（同四店一次性口径：DB `retail.mi7_code` + `STUFF FOR XML PATH`，SQL Server 2012 无 STRING_AGG；47 单中 40 单有号）
+- 新建 [`add_headquarters_retail_detail_merged_xlsx.py`](add_headquarters_retail_detail_merged_xlsx.py)（克隆崇礼版，统一明细源 `all_销售单列表.xls`，`EXCLUDE_CODES` 空）→ 总部主报表 +`年度零售明细` sheet（63列×67行）+ 备份 `headquarters_retail_orders_fy_with_detail.xlsx`；40 单全匹配、**0 差额**（Σ明细总额=销售额合计）、17 单需合并
+- [`export_all_orphan_records.py`](export_all_orphan_records.py) 改：FILES 加 `总部`、`categorize()` 总部由「无财年零售报表(预期)」→「报表无七色米号(待查)」、排序权重 + 文案（四→五店 / 动态计数 / 删硬编码 210·124）
+
+| | 之前 | 现在 |
+|---|---|---|
+| （五）店消费 | 786 | **826**（+40 总部匹配） |
+| 孤儿单据 / 明细行 | 124 / 210 | **84 / 150** |
+| 待查单据 | 30（崇礼25+南山5） | **72**（崇礼25 + 南山4 + **总部43**） |
+| 预期单据 | 94 | 12（关闭7+剔除1+崇礼万龙4） |
+
+📌 关键发现 / 教训：
+- **本机是 Apple Silicon**（brew `/opt/homebrew`，装了 msodbcsql17+18 / unixodbc / pyodbc 4.0.39）：跑库脚本只需 `export ODBCSYSINI=/opt/homebrew/etc`，Driver 18 即脚本 `DEFAULT_CONN` 默认值，**无须 `--conn` 覆盖**。CLAUDE.md 里「Intel Mac / Driver 13 / `/usr/local/Cellar`」那条是另一台机器，本机不适用；`brew --prefix unixodbc` 会卡住，别用 brew 探测，直接看 `/opt/homebrew/etc/odbcinst.ini` + `pyodbc.drivers()`
+- **总部 7 个无七色米号单全标红且非测试单**：`ZB_LS_260104_00001~00007` 同日 2026-01-04、金额 ¥300–¥4600（合计 ¥16,350）全额已付——按既定口径「实额缺号保留标红、不剔除」，`EXCLUDE_CODES` 留空；疑一批真实单漏录七色米引用，待问业务
+- **跨店七色米号会命中别店单据**：南山待查 5→4，因 1 个南山门店 all 单据的七色米号被某总部零售单消费（属正确行为，非 bug）
+- **总部 43 单待查**（83 明细行）与崇礼旗舰/南山待查同性质：七色米有总部销售但 DB 零售单未带匹配号或超财年口径，待人工逐项核
+
+**状态**
+- ✅ 总部财年零售报表 + 三表对账 + 年度零售明细 + 孤儿五店重算
+- 仍开放：总部 `ZB_LS_260104_*` 7 单无号 / 总部 43 待查 / 崇礼旗舰 25 / 南山 4 待查 逐项核；渔阳/怀北零售按需同法一行命令

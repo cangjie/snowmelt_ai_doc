@@ -1,8 +1,8 @@
-"""一次性产物：反向核对导出 —— all_销售单列表.xls 中不在四店任何
+"""一次性产物：反向核对导出 —— all_销售单列表.xls 中不在五店任何
 「年度零售明细」的孤儿记录，按归因分类，供人工逐项核。
 
-孤儿定义：all 销售明细单1 的 单据编号，未被四店报表（南山/万龙体验/
-万龙服务/崇礼）任一 年度零售明细 以「七色米订单号」匹配消费。
+孤儿定义：all 销售明细单1 的 单据编号，未被五店报表（南山/万龙体验/
+万龙服务/崇礼/总部）任一 年度零售明细 以「七色米订单号」匹配消费。
 
 输出 all_销售单列表_孤儿记录.xlsx：
   sheet1 孤儿明细：归因 + 原 34 列（all 销售明细单1 原始行）
@@ -29,6 +29,7 @@ FILES = {
     "万龙体验": "wanlong_retail_orders_fy_2025-05-01_2026-04-30.xlsx",
     "万龙服务": "wanlong_service_retail_orders_fy_2025-05-01_2026-04-30.xlsx",
     "崇礼": "chongli_retail_orders_fy_2025-05-01_2026-04-30.xlsx",
+    "总部": "headquarters_retail_orders_fy_2025-05-01_2026-04-30.xlsx",
 }
 HEADER_FILL = "1F4E78"
 RED = "FF9999"          # 待查（报表无七色米号）
@@ -95,7 +96,7 @@ def main():
             return ("报表内·已关闭(删除)" if stt == "关闭"
                     else "报表内·剔除测试单(删除)")
         if shop == "【总部】":
-            return "总部·无财年零售报表"
+            return "总部·报表无七色米号(待查)"
         if shop == "【崇礼-万龙店】":
             return "崇礼万龙店·无财年零售报表"
         if shop == "【崇礼-旗舰店】":
@@ -109,10 +110,10 @@ def main():
     order = {
         "崇礼旗舰·报表无七色米号(待查)": 0,
         "南山·报表无七色米号(待查)": 1,
-        "报表内·已关闭(删除)": 2,
-        "报表内·剔除测试单(删除)": 3,
-        "崇礼万龙店·无财年零售报表": 4,
-        "总部·无财年零售报表": 5,
+        "总部·报表无七色米号(待查)": 2,
+        "报表内·已关闭(删除)": 3,
+        "报表内·剔除测试单(删除)": 4,
+        "崇礼万龙店·无财年零售报表": 5,
     }
 
     def sort_key(d):
@@ -185,15 +186,18 @@ def main():
     for d in orphan:
         rowcnt[cat_of[d]] += len(doc_rows[d])
     print(f"all 销售明细单1: {len(all_docs)} 单据 / {n_all_rows} 明细行")
-    print(f"四店消费: {len(all_docs & consumed)} 单据")
+    print(f"五店消费: {len(all_docs & consumed)} 单据")
     print(f"孤儿: {len(orphan)} 单据 / "
           f"{sum(len(doc_rows[d]) for d in orphan)} 明细行\n")
     print("归因（单据数 / 明细行数）：")
     for k in sorted(cnt, key=lambda x: order.get(x, 9)):
         flag = "  ← 待查" if k.endswith("(待查)") else ""
         print(f"  {k:32s} {cnt[k]:4d} / {rowcnt[k]:4d}{flag}")
+    n_orphan_docs = len(orphan)
+    n_orphan_rows = sum(len(doc_rows[d]) for d in orphan)
     print(f"\n[OK] 导出 {OUT}  ({os.path.getsize(OUT) / 1024:.1f} KB)")
-    print("  sheet: 孤儿明细 (210 行级) / 孤儿汇总 (124 单据级)；待查行标红")
+    print(f"  sheet: 孤儿明细 ({n_orphan_rows} 行级) / "
+          f"孤儿汇总 ({n_orphan_docs} 单据级)；待查行标红")
 
 
 if __name__ == "__main__":
