@@ -235,6 +235,9 @@ dotnet run
 - **`api/Rent/GetConfirmedRentOrder` (RentController.cs:5544) 的"确认订单"5 条规则**：paidAmount > 0 AND closed=1 AND close_date != null AND !hide AND 不含非微信非支付宝支付（现金/储值/转账等会被排除）；做对账报表时这是参考过滤口径
 - **`punch_card` / `punch_card_used` 表存在但 EF 未接**：DB 有 `punch_card`(36 行, 字段 id/biz_type/card_name/member_id/mi7_code/total/punches) + `punch_card_used`(**0 行**, 字段 id/card_id/order_id/biz_type/biz_id/payment_id/punch_count/valid)。`SnowmeetApi/Models/` 下**无** `PunchCard` / `PunchCardUsed` 模型（grep 0 命中）。当前业务核销「次卡支付」仍走 `order_online.pay_memo='次卡支付'`（6 单）/ `[order].pay_option='次卡支付'` 字符串标记的老路径，新结构化的 punch_card_used 明细表尚无写入代码
 - **同步以 skill 步骤为准，别依赖本机 hook**：start-work 已把 `git -C snowmeet_ai_doc pull --ff-only` 内置为 `SKILL.md` 第 1 步（入库、跨机生效）。`.claude/settings.local.json` 的 PreToolUse(pull) / Stop(push) hook 是 gitignored / 机器本地；本会话实测 PreToolUse **未触发**（疑非标准 `if` 键），仅作冗余。Stop hook 已收紧为仅 `git add -- sessions CLAUDE.md`（不再 `git add .` 吞 WIP），非归档改动不会被自动 push，留待手动
+- **`all_销售单列表.xls` 是七色米全店全量导出**（崇礼/万龙/南山/总部/离职等所有门店，910 单据/1268 明细行）。`万龙_销售单列表.xls` 也是多店全量（含 592 南山店行），行级 100% ⊆ all；`南山_销售单列表.xls` 与 all 同单据同店但 **595 行全不相等，唯一差异列 `成本额`**（南山那份是 `'-'` 占位，all 是真实成本），其余 33 列 + 合并用全部 10 个明细字段（商品编号/名称/分类/规格/属性/数量/单价/折扣/折后单价/总额）完全一致 → **三个 `add_*_retail_detail_merged` 脚本可统一用 `all_销售单列表.xls` 作单一明细源，合并结果不变**（成本额不在合并 10 字段内）。原 `销售单列表_c393a061-...xls` 已改名 `南山_销售单列表.xls`
+- **本机(Intel Mac) python3 默认无 `xlrd`**（读 `.xls` 必需）：已 `pip3 install xlrd`(2.0.2)。新机器跑 `add_*_retail_detail_merged_xlsx.py` / `export_all_orphan_records.py` 前先装 xlrd + openpyxl
+- **零售明细合并孤儿口径**：反向核对 = `all 单据编号集合 − 四店年度零售明细已消费的七色米订单号集合`，再按 `所属门店` + 是否出现在某报表 `年度零售`(含关闭/剔除单) 归因。「总部/崇礼万龙店无财年零售报表」「报表内但单关闭/剔除被删」属预期；「崇礼旗舰/南山·报表无此七色米号」才是待查（七色米有销售但 DB 零售单未带匹配号或超财年口径）
 
 ---
 
@@ -1075,3 +1078,45 @@ dotnet run
 - **Windows+Excel 锁**：写 xlsx 前 `ls '~$<同名>.xlsx'` 探锁，被占用必 PermissionError，提示关闭再跑（保存失败不损原文件）。
 - 用户协作偏好：迭代式收紧（先默认草稿→多轮反馈逐步加规则）；关键基准用 AskUserQuestion 单点确认，不连发多选。
 - 仍开放：据 §5 把 `NS_LS_251207_00004→XSD20251207006I`、`NS_LS_260205_00002→XSD20260205002I` 七色米号补正后重跑可由红转匹配（¥3,787）；`NS_LS_251202_00001` ¥400 待查 Qisemi 导出范围。
+
+### 2026-05-19（续）— 万龙/崇礼零售明细 + all 统一明细源 + 反向核对孤儿导出
+
+接续南山零售明细线。本会话把 `年度零售明细` 合并扩展到万龙体验/万龙服务/崇礼三店，确认 `all_销售单列表.xls` 可作跨店统一明细源，并补做之前推迟的反向核对（孤儿记录导出）。详见 [`sessions/2026-05-19_wanlong_chongli_detail_and_orphan_reconcile.md`](sessions/2026-05-19_wanlong_chongli_detail_and_orphan_reconcile.md)。
+
+#### 一、南山"替换"诉求 → 确认纯无操作
+
+- 用户要求用 `nanshan_..._with_detail.xlsx` 的 `年度零售明细` 替换主文件同名 sheet。严格比对（值 + 合并区 + freeze + 全单元格 fill 的 pattern/fg/bg rgb+theme+indexed+tint + 字体加粗/色 + 数字格式）**全表 586×67 零差异**。
+- 用户原诉求"有问题的行底色不一样"未落盘：两文件 mtime 同为脚本生成时刻，Excel 打开后未保存就关（mtime 未变）。结论：无需任何改动，未写文件。
+
+#### 二、仿南山规则克隆三店脚本（sibling）
+
+口径完全沿用 `add_retail_detail_merged_xlsx.py`：匹配键 `七色米订单号==单据编号`、配色优先级 蓝(>1明细 EAF2FB)<粉(差额 FCE4EC)<红(非关闭无明细 FF9999)、关闭单整单删除、`DIFF_TOL=0.01`、幂等插主表 + 独立 `*_with_detail.xlsx` 备份。万龙说明：两店明细共用一个 xls，**反向核对不做**（脚本本就只正向匹配，不会因明细属另一店而误判）。
+
+| 脚本 | 明细源 | 行数演化（剔除前→后） |
+|---|---|---|
+| [`add_wanlong_service_retail_detail_merged_xlsx.py`](add_wanlong_service_retail_detail_merged_xlsx.py) | 万龙_销售单列表.xls | 31行: 6关闭删/22匹配/3红 → 剔 2 笔 ¥0.02 测试单 → **23行**（22匹+1红 `WF_LS_260315_00001` ¥1200 保留） |
+| [`add_wanlong_retail_detail_merged_xlsx.py`](add_wanlong_retail_detail_merged_xlsx.py) | 万龙_销售单列表.xls | 186行: 32关闭/137匹配/17红 → 剔 14 笔（9 微额¥0.0x + 5 笔¥0） → **178行**（137匹+3红实额¥360/5979/1500 保留）；28合并/16差额 |
+| [`add_chongli_retail_detail_merged_xlsx.py`](add_chongli_retail_detail_merged_xlsx.py) | **all_销售单列表.xls** | 261行: 51关闭/162匹配/48红 → 剔 25 笔（21微额+4¥0） → **302行**（162匹+23红实额 ¥100–7850 保留）；71合并/24差额 |
+
+三店主报表原 3 sheet（年度零售/支付明细/支付流水）均未动，`年度零售明细` 幂等删重建。
+
+#### 三、all 包含性核查 + 统一明细源结论
+
+- 万龙_销售单列表.xls：销售列表/销售明细单1 行级 **100% ⊆ all**（0 单据缺失/0 行缺失），本就是多店全量（崇礼旗舰294/崇礼万龙204/总部100/离职3/**南山店592** 行）。
+- 南山_销售单列表.xls：474 单据全部在 all 且门店一致，但 **595 明细行逐行全不等，唯一差异列 `成本额`**（南山 `'-'` vs all 真实值如 65.0），其余 33 列 + 合并 10 字段完全相同。
+- 结论：**`all_销售单列表.xls` 是跨店统一明细源**，三脚本统一指向它结果不变（成本额不在合并 10 字段）。
+
+#### 四、反向核对：孤儿记录导出
+
+- 新建 [`export_all_orphan_records.py`](export_all_orphan_records.py) → [`all_销售单列表_孤儿记录.xlsx`](all_销售单列表_孤儿记录.xlsx)（46.7KB，sheet `孤儿明细` 210行级 / `孤儿汇总` 124单据级，待查行标红 FF9999，按归因排序）。
+- 孤儿 = all 910 单据 − 四店消费 786 = **124 单据 / 210 明细行**。归因：
+  - 预期 94 单：总部 82（无财年零售报表）/ 崇礼万龙店 4（无报表）/ 报表内但单关闭被删 7 / 剔除测试单 1
+  - **待查 30 单**：崇礼旗舰 25 + 南山 5（报表无对应七色米号；南山 5 含日志早记的 `XSD20251207006I` / `XSD20260205002I`）
+- 校验侧：四店消费的七色米号 100% ⊆ all（无撞号泄漏），正向 join 完整。
+
+📌 关键发现 / 教训：
+- **all_销售单列表.xls = 七色米全店全量**；南山_文件仅 `成本额` 列空（占位 `'-'`），合并 10 字段不含成本额 → 跨店可统一 all 源（单点真理再延伸）。
+- **反向核对靠差集 + 双维归因**：`all单据 − 四店消费七色米号`，再按 门店 + 是否在报表年度零售(含关闭/剔除) 分「预期 vs 待查」，避免把"无报表门店/已删单"误报为漏。
+- **严格 sheet 等价比对**必须带 fill 的 pattern/theme/indexed/tint + 字体色 + 数字格式 + 值；只比 `fill.start_color.rgb` 会漏 theme/indexed 色，且只扫单列会漏判（南山案例先只比 A 列得 0 差异，全表才确认真 0）。
+- Intel Mac python3 默认无 `xlrd`，读 `.xls` 前 `pip3 install xlrd`。
+- 用户口径沿用并固化：微额 ¥0.0x + ¥0 无号单当测试单整单剔除，实额缺号保留标红；剔除范围用单点 `AskUserQuestion` 确认，不连发多选。
