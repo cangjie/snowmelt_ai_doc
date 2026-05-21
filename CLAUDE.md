@@ -171,7 +171,7 @@ dotnet run
 
 ---
 
-## 当前状态（截至 2026-05-17）
+## 当前状态（截至 2026-05-21 晚）
 
 **已可走通**：录入订单 → 选店 → 进入租赁开单 → 添加套餐（按品类筛选 + 万龙系店铺默认「立即租赁」+ 雪服/护具等非编码品类默认勾选「无编码」+ 创建时 startTime 默认当前时分）→ 购物车展示（rental 折叠态紧凑单行；展开态两层标题 + 跑马灯；rental 级 + rentItem 级双层完整性 chip；不完整时套餐名变红）→ 卡片展开编辑详情（套餐备注 + 起租日期 van-calendar 弹窗 + 今/明高亮快捷按钮 + 起租时间 picker；选租赁模式自动联动起租日期/时间：立即/先租后取=今天+当前时分、延时=明天+00:00；无编码/不需要 disabled 联动 + 不需要时整卡灰显）→ 装备编码录入（点编码区开搜索 modal，按品类模糊搜索租赁物，单选确认后回填 code/name/category_id/rent_product_id/class_name + 重复编码校验；扫码仍然可用）→ 押金/租金点击 tap 弹 `wx.showModal` 二次确认编辑（押金净额显示 = `realGuaranty − guaranty_discount`，下方购物车栏「押金 ¥净额 已减免 -¥xxx」）→ 套餐选模式时未自选 item 跟随 + 内部模式不一致显示 ⚠ → 左划删除 → 底部 4 个快捷入口横向紧凑按钮 + 单行结算条（件数徽章 + 押金 + 已减免 + 租金 + 去结算按钮，全部 rental 完整才允许点击）→ 点「去结算」先 await `saveRentReceptOrder` 落盘最新编辑、再调 `Order/PlaceRentOrder/{id}` 让服务端 `GenerateOrderCode` 生成 `WL_ZL_yyMMdd_xxxxx` 正式订单号 + `valid=1` + 写 Guaranty，返回的 order 回填 `this.data.order` → 跳 `/pages/payment/settle/index?orderId=...` → 结算页订单卡显示 `order.code || order.id` + 三选一支付方式（微信扫码 / 支付宝 mock / 其他确认收款）→ **顾客扫支付二维码进入 `pages/order/payment_entry`：轻量化纯 CSS 卡片版（订单信息 / 租赁内容折叠 / 金额 / 微信支付按钮），租赁明细只列 编码/名称/品类，押金 + 日租金同行各 300rpx 列宽** → 小程序客户端所有 `wx.request` 的 `POST` 请求在全局请求层统一对 payload 内 URL 编码中文执行 `urldecode`（含嵌套对象/数组）。每次结构变更/字段失焦自动 `Rent/SaveRentRecept` 同步后端，起租日期/时间通过 `start_date` (ISO datetime) 真持久化。→ **顾客扫码 payment_entry 落地后增加支付前身份验证**：onShow 调 `PaymentIdentity/CheckPayerIdentity` 拉 5 状态 → 未绑手机号弹一键授权 / 订单已匹配别人弹「正常支付（订单转归我）」「替人代付（订单仍归原会员）」二选一 modal / 订单未匹配会员则确认「订单将归我」→ `ConfirmPayIdentity` 立即落库 `Order.member_id` / `OrderPayment.member_id` / `is_proxy_pay` / `wechat_unverified`（支付宝支付一律置 `wechat_unverified=true`）→ status 转 `direct` 后才显示原微信支付按钮。**支付宝手机号解密目前是 stub**（待支付宝小程序对接）。
 
@@ -186,6 +186,8 @@ dotnet run
   - `add_skipass_detail_merged_sheet.py`（`--xlsx --shop`）— 加「年度雪票明细」合并 sheet（年度雪票 × ski_pass 一对多，多明细整行浅蓝 `EAF2FB`）
   - `add_skipass_list_sheet_to_chongli_fy.py` — 把外部「雪票列表_YYYY-MM-DD.xls」作为新 sheet 加入崇礼 xlsx（写死路径，按需克隆）
   - `annotate_skipass_list_sheet.py` — 操作崇礼「雪票列表」sheet：渠道订单号匹配 + 实际支付 + 字体灰/底红/底黄
+- 养护财年扩展脚本（`snowmeet_ai_doc/`，参数化跨店复用）：
+  - `add_care_detail_merged_sheet.py`（`--xlsx --shop [--start --end]`）— 加「年度养护明细」合并 sheet（年度养护 × care 一对多 + 7 staff 列：安全检查人/修刃人/机打蜡人/热打蜡人/刮蜡人/维修人/发板人，多 care 整行浅蓝 `EAF2FB`，三店跑通零差异）
 
 **下一步要做的**
 - ✅ 第五步：支付结算页 mvp 完成（settle/index + order-summary-card + order-payment，微信支付走通、支付宝 mock、其他方式确认收款）
@@ -247,6 +249,7 @@ dotnet run
 - **零售明细合并孤儿口径**：反向核对 = `all 单据编号集合 − 五店年度零售明细已消费的七色米订单号集合`（2026-05-19续2 起含总部），再按 `所属门店` + 是否出现在某报表 `年度零售`(含关闭/剔除单) 归因。「崇礼万龙店无财年零售报表」「报表内但单关闭/剔除被删」属预期；「崇礼旗舰/南山/**总部**·报表无此七色米号」才是待查（七色米有销售但 DB 零售单未带匹配号或超财年口径）。**总部已于 2026-05-19续2 出财年零售报表 + 年度零售明细**，不再属「无报表」预期，其未匹配单转待查
 - **雪票数据：南山一单可多票，崇礼一单一票**：崇礼旗舰店 25-26 财年 572 张票/572 单（1:1，572 + 138 空订单 = 710 总订单去重 709），南山 542 张/463 单（**1.17 票/单**，58 单多票 + 389 空订单 = 852 总订单去重）。雪票级字段（`product_name / deal_price / ticket_price / card_member_pick_time / deposit / refund_amount / have_refund / card_member_return_time`）聚合到订单级时必须用多票兜底口径：name 分号 `; ` 连接去重 / 价格 SUM / 时间 MIN。**`have_refund` 字段只有 1（已退）和 NULL（未退）两种值，无 0**，转标签时 `1→"是" / NULL→"否"`。雪票级明细合并 sheet（一对多展开）见 `add_skipass_detail_merged_sheet.py`
 - **「雪票列表」外部 xls 渠道订单号匹配键**：自我游/七色米导出的 `雪票列表_YYYY-MM-DD.xls`（崇礼用），1 sheet × 28 列，「渠道订单号」(第 23 列) 格式 `{snowmeet 订单号}_ZF_NN`（如 `QJ_XP_260405_00001_ZF_02`，与支付流水 `out_trade_no` 命名约定一致：支付 `_ZF_` / 退款 `_TK_` / 分账 `_FZ_`）。匹配「年度雪票」订单号时用 `split('_ZF_')[0]` 取前缀。标注脚本 `annotate_skipass_list_sheet.py` 默认 LOW=HIGH=20（与"已取消>20"阈值对齐成两端切分，红 0 / 黄 2）
+- **养护数据：`care_task.task_name` 三种「打蜡」相关值**：`打蜡`(554) / `热蜡`(2424) / `机打蜡`(32)。业务拍板的列映射：机打蜡人 = 仅 `机打蜡`、热打蜡人 = `热蜡` ∪ `打蜡`（合并去重 care_id）。其余 5 staff 列单一映射：安全检查/修刃/刮蜡/维修/发板。同 care 同 task_name 多个 staff_id 用 `; ` 连接去重。详见 [`add_care_detail_merged_sheet.py`](add_care_detail_merged_sheet.py)。`shop.name` 三店分别是 `万龙服务中心` / `南山` / `崇礼旗舰店`（后两个不带"店"），脚本 `--shop` 参数要按 DB 实值传
 - **end-work 不需要确认（用户拍板）**：触发 end-work 后直接落盘 CLAUDE.md + sessions/ 归档 + `git commit + push`，**永远不需要 AskUserQuestion 确认**。"以后永远都不需要确认"是用户明令；之前的"draft → 确认 → 写盘"流程作废
 
 ---
@@ -1217,3 +1220,38 @@ dotnet run
 - **阈值"很低"和"较大"对齐成两端切分**：用户选 LOW=HIGH=20 表示"已完成<20 红、已取消>20 黄"，20 元作为雪票合理金额的切分线；红 0 单反向验证阈值合理（已完成实付都≥20）
 - **end-work 不需要确认（用户拍板）**：直接落盘 + git push，永远不再 AskUserQuestion；已记入 auto-memory feedback
 - **崇礼脚本幂等重跑**：参数化只换形参不改主逻辑，等价确定无需验证；但用户 Excel 开着目标文件时 openpyxl 写盘会 PermissionError，需先关 Excel 或跳过
+
+### 2026-05-21（晚） — 养护财年明细合并 sheet（三店）：年度养护 × care 一对多 + 7 staff 列
+
+接续 5-20 雪票明细合并 sheet 模式推广到养护业务。三店（万龙服务中心 / 南山 / 崇礼旗舰店）的 `*_care_orders_fy_2025-05-01_2026-04-30.xlsx` 均新增 sheet `年度养护明细`。脚本 [`add_care_detail_merged_sheet.py`](add_care_detail_merged_sheet.py) 一次性参数化（`--xlsx --shop --start --end`）跨店零代码复用。详见 [`sessions/2026-05-21_care_detail_merged_sheet_three_shops.md`](sessions/2026-05-21_care_detail_merged_sheet_three_shops.md)。
+
+#### 一、需求口径调整 6→7 列 + 「打蜡」歧义拍板
+
+- 初版 6 列（`安全检查人/修刃人/打蜡人/刮蜡人/维修人/发板人`）→ DB 调研发现 `care_task.task_name` 有「打蜡」(554)/「热蜡」(2424)/「机打蜡」(32) 三种值
+- 用户中断后改成 7 列（拆「机打蜡人/热打蜡人」），拍板映射：
+  - **机打蜡人 = 仅 `机打蜡`**
+  - **热打蜡人 = `热蜡` ∪ `打蜡`**（合并去重 care_id）
+  - 其余 5 列单一映射：`安全检查/修刃/刮蜡/维修/发板`
+
+#### 二、脚本结构（仿 `add_skipass_detail_merged_sheet.py`）
+
+- 主 sheet `年度养护` 订单级 + DB `care` 表（`shop + start_date 区间 + order_id` 拉）+ `care_task` JOIN `staff` 派生 7 staff 列
+- 同 care 同 task_name 多个 staff_id → `; ` 连接去重；多 care 订单整行（含 7 staff 列）上色 `EAF2FB` 浅蓝；订单级列做垂直合并单元格
+- 无 care 订单保留单行；列数 = 订单级 + 15 care 字段 + 7 staff（万龙服务订单级多 9 列）
+
+#### 三、三店对账（全部零差异 ✓）
+
+| 店铺 | 订单 | 多care单 | care总数 | 有员工 | 明细行 | 列数 |
+|------|------|---------|---------|--------|--------|------|
+| 万龙服务中心 | 4014 | 336 | 4394 | 3817 | 4981 | 85 |
+| 南山 | 86 | 5 | 92 | 58 | 92 | 76 |
+| 崇礼旗舰店 | 23 | 5 | 28 | 10 | 31 | 76 |
+
+万龙服务热打蜡人列正确合并 `热蜡`(2313) ∪ `打蜡`(508) = 2821（去重 care_id），与 DB 直查一致。7 staff 列在三店 × DB JOIN `staff` 期望数全部零差异。
+
+📌 关键发现 / 教训：
+- **`care_task.task_name` 三种「打蜡」相关值**：`打蜡` / `热蜡` / `机打蜡`。业务口径下「打蜡」归到「热打蜡」侧（与「热蜡」合并去重 care_id），机打蜡仅 `机打蜡` 一种；做养护类报表前先和业务对齐
+- **同一 care 多个同类型 task**：一个 care_id 在 `care_task` 表里可能有多条同 task_name 不同 staff_id 的记录，派生 staff 列必须 `; ` 连接去重（与雪票多票兜底口径同理）
+- **zsh heredoc 处理中文字符串易 mangle**：Python `<< EOF` 内嵌中文 task_name 时 `pyodbc` 收到的可能是乱码导致校验全错；改成写真 `.py` 文件用 `python3 -u file.py` 跑稳定可复现
+- **`iter_rows` 远快于 `cell(r,c)`**：4981 × 85 校验前者秒级、后者超时；大 xlsx 校验默认走 `iter_rows`
+- **三店 shop 名先查 DB**：`shop.name` 中三店分别是 `万龙服务中心` / `南山` / `崇礼旗舰店`（南山/崇礼不带"店"），拍脑袋拼会 0 条 care
